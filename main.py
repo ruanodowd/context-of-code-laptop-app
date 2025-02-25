@@ -9,9 +9,9 @@ from client.aggregator import MetricsAggregator
 from client import config
 
 # Import your collectors here
-from collectors.battery_collector.battery_data import BatteryCollector
+from collectors.battery_collector.battery_collector import BatteryCollector
 # Import other collectors as needed
-
+from collectors.bus_collector.bus_collector import BusCollector
 # Configure logging
 logging.basicConfig(
     level=config.LOG_LEVEL,
@@ -25,6 +25,7 @@ def setup_collectors(aggregator):
     """
     # Register your collectors here
     aggregator.register_collector(BatteryCollector())
+    aggregator.register_collector(BusCollector())
     # Add other collectors as needed
 
 def graceful_shutdown(signum, frame):

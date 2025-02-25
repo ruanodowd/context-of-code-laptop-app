@@ -9,7 +9,7 @@ API_KEY = os.getenv('METRICS_API_KEY', '')
 
 # Client configuration
 CLIENT_ID = os.getenv('METRICS_CLIENT_ID', 'default-client')
-COLLECTION_INTERVAL = int(os.getenv('METRICS_COLLECTION_INTERVAL', '300'))  # seconds
+COLLECTION_INTERVAL = int(os.getenv('METRICS_COLLECTION_INTERVAL', '30'))  # seconds
 
 # HTTP client configuration
 REQUEST_TIMEOUT = 30  # seconds
