@@ -5,7 +5,7 @@ import logging
 import signal
 import sys
 from apscheduler.schedulers.blocking import BlockingScheduler
-from client.aggregator import MetricsAggregator
+from sdk import register_collector, collect_and_send
 from client import config
 
 # Import your collectors here
@@ -19,13 +19,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def setup_collectors(aggregator):
+def setup_collectors():
     """
-    Register all collectors with the aggregator.
+    Register all collectors with the SDK.
     """
     # Register your collectors here
-    aggregator.register_collector(BatteryCollector())
-    aggregator.register_collector(BusCollector())
+    register_collector(BatteryCollector())
+    register_collector(BusCollector())
     # Add other collectors as needed
 
 def graceful_shutdown(signum, frame):
@@ -41,14 +41,13 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
     
-    # Initialize the metrics aggregator
-    aggregator = MetricsAggregator()
-    setup_collectors(aggregator)
+    # Initialize the collectors
+    setup_collectors()
     
     # Setup the scheduler
     scheduler = BlockingScheduler()
     scheduler.add_job(
-        aggregator.collect_and_send,
+        collect_and_send,
         'interval',
         seconds=config.COLLECTION_INTERVAL
     )

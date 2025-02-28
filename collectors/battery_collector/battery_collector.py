@@ -2,10 +2,11 @@ import os
 import subprocess
 import json
 import logging
+from sdk.collector import Collector
 
 logger = logging.getLogger(__name__)
 
-class BatteryCollector:
+class BatteryCollector(Collector):
     """Collector for battery metrics."""
     
     def __init__(self):
@@ -31,7 +32,7 @@ class BatteryCollector:
             return self._collect_linux()
         except Exception as e:
             logger.error(f"Error collecting battery metrics: {str(e)}")
-            return {'error': str(e)}
+            raise RuntimeError(f"Error collecting battery metrics: {str(e)}")
     
     def _collect_wsl(self):
         """Collect battery metrics in WSL environment."""
@@ -75,10 +76,8 @@ class BatteryCollector:
 
 if __name__ == '__main__':
     collector = BatteryCollector()
-    battery_info = collector.collect()
+    battery_info = collector.safe_collect()
     if 'error' in battery_info:
         print(battery_info['error'])
     else:
-        print(f"Battery percentage: {battery_info['percentage']}%")
-        print(f"Charging status: {'Charging' if battery_info['is_charging'] else 'Not charging'}")
-        print(f"Current status: {battery_info['status']}")
+        print(f"Battery percentage: {battery_info['metric']}%")

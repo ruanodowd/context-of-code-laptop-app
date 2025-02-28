@@ -3,10 +3,11 @@ import logging
 import requests
 from requests.exceptions import RequestException
 from typing import Dict, Optional
+from sdk.collector import Collector
 
 logger = logging.getLogger(__name__)
 
-class BusCollector:
+class BusCollector(Collector):
     """Collector for bus arrival metrics."""
     
     def __init__(self):
@@ -117,7 +118,7 @@ class BusCollector:
             return metrics
         except Exception as e:
             logger.error(f"Error collecting bus metrics: {str(e)}")
-            return {'error': str(e)}
+            raise RuntimeError(f"Error collecting bus metrics: {str(e)}")
 
 if __name__ == '__main__':
     # Setup logging
@@ -126,7 +127,7 @@ if __name__ == '__main__':
     # Test the collector
     collector = BusCollector()
     try:
-        metrics = collector.collect()
+        metrics = collector.safe_collect()
         if 'error' in metrics:
             print(f"Error: {metrics['error']}")
         else:
