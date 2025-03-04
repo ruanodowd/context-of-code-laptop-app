@@ -195,3 +195,35 @@ The repository includes a command-line interface (CLI) application (`new_main.py
 ```bash
 ./new_main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --dry-run
 ```
+
+## Command Relay System
+
+The application includes a command relay system that allows the client to receive and execute commands from a server, even when behind NAT, firewalls, or restrictive networks like university networks. This system uses a polling approach where the client periodically checks for new commands from the server.
+
+### Supported Commands
+
+- `shutdown_wsl`: Shuts down the Windows Subsystem for Linux
+- `ping`: Simple ping command for testing connectivity
+
+### Usage
+
+To enable the command relay system, use the following options:
+
+```bash
+./main.py --enable-command-relay --command-server-url "https://your-server.com/api" --poll-interval 30 --collect-battery
+```
+
+### Command Relay Options
+
+- `--enable-command-relay`: Enable the command relay system
+- `--command-server-url`: Base URL of the command server API
+- `--poll-interval`: Interval between polling for commands in seconds (default: 30)
+
+### How It Works
+
+1. The client registers with the server on startup
+2. The client periodically polls the server for new commands
+3. When a command is received, the client executes it and sends the result back to the server
+4. The client maintains a heartbeat with the server to indicate it's still active
+
+This approach works well in restricted network environments since it only requires the client to make outbound HTTP requests, which are typically allowed even in restrictive networks.

@@ -13,6 +13,7 @@ from collectors.battery_collector.battery_collector import BatteryCollector
 from collectors.bus_collector.bus_collector import BusCollector
 from sdk import metrics_sdk
 from sdk import config
+from command_relay import start_command_relay, stop_command_relay
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -232,6 +233,14 @@ def main():
     parser.add_argument('--request-timeout', type=int, default=config.REQUEST_TIMEOUT,
                         help='Request timeout in seconds')
     
+    # Command relay options
+    parser.add_argument('--enable-command-relay', action='store_true',
+                        help='Enable command relay to receive commands from server')
+    parser.add_argument('--command-server-url', type=str,
+                        help='Base URL of the command server API')
+    parser.add_argument('--poll-interval', type=int, default=30,
+                        help='Interval between polling for commands in seconds')
+    
     # Parse arguments
     args = parser.parse_args()
     
@@ -244,6 +253,16 @@ def main():
     # Check if the server is accessible
     if not args.dry_run and not metrics_sdk.health_check():
         logger.warning("Metrics server is not accessible. Metrics will be buffered.")
+    
+    # Start command relay if enabled
+    if args.enable_command_relay:
+        logger.info("Starting command relay client...")
+        start_command_relay(
+            server_url=args.command_server_url,
+            api_key=args.api_key,
+            client_id=args.source_name,
+            poll_interval=args.poll_interval
+        )
     
     # Validate arguments
     if not args.collect_battery and not args.bus_routes:
@@ -271,6 +290,11 @@ def main():
     buffered_count = metrics_sdk.get_buffered_count()
     if buffered_count > 0:
         logger.info(f"There are {buffered_count} metrics in the buffer.")
+    
+    # Stop command relay if it was started
+    if args.enable_command_relay:
+        logger.info("Stopping command relay client...")
+        stop_command_relay()
     
     logger.info("Collection completed.")
 
