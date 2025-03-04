@@ -140,3 +140,58 @@ manager.collect_and_send()
 ## Error Handling and Buffering
 
 The SDK includes automatic buffering of metrics when the server is unavailable. Buffered metrics will be sent when the server becomes available again.
+
+## CLI Application
+
+The repository includes a command-line interface (CLI) application (`new_main.py`) that allows you to collect and send metrics with customizable options.
+
+### Usage
+
+```bash
+./new_main.py [options]
+```
+
+### Options
+
+#### General Options
+- `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`: Set the logging level (default: INFO)
+- `--interval INTERVAL`: Interval between collections in seconds (default: 60)
+- `--count COUNT`: Number of collection rounds (0 for infinite) (default: 1)
+- `--dry-run`: Do not send metrics to server, just log them
+
+#### Collector Options
+- `--collect-battery`: Collect battery metrics
+- `--bus-routes [BUS_ROUTES ...]`: Bus routes to monitor in format "from_stop:to_stop"
+
+#### SDK Configuration
+- `--server-url SERVER_URL`: URL of the metrics server
+- `--api-key API_KEY`: API key for authentication
+- `--source-name SOURCE_NAME`: Source name for metrics
+- `--source-description SOURCE_DESCRIPTION`: Description of the source
+- `--source-ip SOURCE_IP`: IP address of the source
+- `--buffer-file BUFFER_FILE`: Path to the buffer file
+- `--max-retries MAX_RETRIES`: Maximum number of retries
+- `--retry-delay RETRY_DELAY`: Delay between retries in seconds
+- `--request-timeout REQUEST_TIMEOUT`: Request timeout in seconds
+
+### Examples
+
+#### Collect Battery Metrics Once
+```bash
+./new_main.py --collect-battery
+```
+
+#### Collect Bus Information Every 5 Minutes
+```bash
+./new_main.py --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" "T310 Beechfield:T310 UL East Gate / An Geata Thoir" --interval 300 --count 0
+```
+
+#### Collect All Metrics with Custom Source Name
+```bash
+./new_main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --source-name "my-laptop" --source-description "My Personal Laptop"
+```
+
+#### Dry Run to Test Configuration
+```bash
+./new_main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --dry-run
+```
