@@ -43,7 +43,6 @@ class BatteryCollector(Collector):
             
             if result.returncode == 0 and result.stdout.strip():
                 battery_data = json.loads(result.stdout)
-                
                 percentage = battery_data['EstimatedChargeRemaining']
                 
                 return {

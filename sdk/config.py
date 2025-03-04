@@ -2,13 +2,16 @@
 Configuration settings for the Metrics SDK.
 """
 import os
+import socket
 
 # Server configuration
 SERVER_URL = os.getenv('METRICS_SERVER_URL', 'http://localhost:8000/api/metrics')
 API_KEY = os.getenv('METRICS_API_KEY', 'metrics-api-key-2025')
 
-# Client configuration
-CLIENT_ID = os.getenv('METRICS_CLIENT_ID', 'default-client')
+# Source configuration (replaces CLIENT_ID)
+SOURCE_NAME = os.getenv('METRICS_SOURCE_NAME', socket.gethostname())
+SOURCE_DESCRIPTION = os.getenv('METRICS_SOURCE_DESCRIPTION', f'Metrics from {socket.gethostname()}')
+SOURCE_IP = os.getenv('METRICS_SOURCE_IP', None)  # Will be detected automatically by the server if not provided
 
 # HTTP client configuration
 REQUEST_TIMEOUT = 30  # seconds

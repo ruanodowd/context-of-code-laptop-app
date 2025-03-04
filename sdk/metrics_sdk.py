@@ -1,9 +1,16 @@
 """
 Metrics SDK for sending data snapshots to the server.
+
+This SDK is compatible with the following data model:
+- MetricType: Defines types of metrics (e.g., 'cpu_usage', 'memory_usage')
+- Source: Defines sources from which metrics are collected (e.g., 'server1', 'laptop1')
+- Metric: Stores actual metric measurements with values and timestamps
+- MetricMetadata: Stores additional metadata associated with metrics
 """
 import json
 import logging
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
 import pytz
@@ -92,7 +99,9 @@ class MetricsClient:
         self,
         server_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        client_id: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_description: Optional[str] = None,
+        source_ip: Optional[str] = None,
         buffer_file: Optional[str] = None,
         max_retries: Optional[int] = None,
         retry_delay: Optional[int] = None,
@@ -104,7 +113,9 @@ class MetricsClient:
         Args:
             server_url (str, optional): URL of the metrics server. Defaults to config.SERVER_URL.
             api_key (str, optional): API key for authentication. Defaults to config.API_KEY.
-            client_id (str, optional): Client ID. Defaults to config.CLIENT_ID.
+            source_name (str, optional): Source name for metrics. Defaults to config.SOURCE_NAME.
+            source_description (str, optional): Description of the source. Defaults to config.SOURCE_DESCRIPTION.
+            source_ip (str, optional): IP address of the source. Defaults to config.SOURCE_IP.
             buffer_file (str, optional): Path to the buffer file. Defaults to config.BUFFER_FILE.
             max_retries (int, optional): Maximum number of retries. Defaults to config.MAX_RETRIES.
             retry_delay (int, optional): Delay between retries in seconds. Defaults to config.RETRY_DELAY.
@@ -112,7 +123,9 @@ class MetricsClient:
         """
         self.server_url = server_url or config.SERVER_URL
         self.api_key = api_key or config.API_KEY
-        self.client_id = client_id or config.CLIENT_ID
+        self.source_name = source_name or config.SOURCE_NAME
+        self.source_description = source_description or config.SOURCE_DESCRIPTION
+        self.source_ip = source_ip or config.SOURCE_IP
         self.max_retries = max_retries or config.MAX_RETRIES
         self.retry_delay = retry_delay or config.RETRY_DELAY
         self.request_timeout = request_timeout or config.REQUEST_TIMEOUT
@@ -121,7 +134,12 @@ class MetricsClient:
         
         # Store metric type mappings (name -> id)
         self.metric_types = {}
+        # Store source id
+        self.source_id = None
+        
+        # Load metric types and ensure source exists
         self._load_metric_types()
+        self._ensure_source()
     
     def _retry_if_connection_error(self, exception: Exception) -> bool:
         """
@@ -147,12 +165,12 @@ class MetricsClient:
             metric_types = response.json()
             
             # Map name to id for easy lookup
-            self.metric_types = {mt['name']: mt['id'] for mt in metric_types}
-            logger.debug(f"Loaded {len(self.metric_types)} metric types from server")
+            self.metric_types = {mt['name']: mt['id'] for mt in metric_types if mt.get('is_active', True)}
+            logger.debug(f"Loaded {len(self.metric_types)} active metric types from server")
         except Exception as e:
             logger.warning(f"Failed to load metric types: {str(e)}")
     
-    def _ensure_metric_type(self, name: str, description: str = None, unit: str = None) -> int:
+    def _ensure_metric_type(self, name: str, description: str = None, unit: str = None) -> str:
         """
         Ensure a metric type exists, creating it if necessary.
         
@@ -162,7 +180,7 @@ class MetricsClient:
             unit (str, optional): Unit of measurement
             
         Returns:
-            int: ID of the metric type
+            str: UUID of the metric type
         """
         if name in self.metric_types:
             return self.metric_types[name]
@@ -174,7 +192,8 @@ class MetricsClient:
                 json={
                     'name': name,
                     'description': description or f"Metric type for {name}",
-                    'unit': unit
+                    'unit': unit,
+                    'is_active': True
                 },
                 headers={'X-API-Key': self.api_key},
                 timeout=self.request_timeout
@@ -267,6 +286,59 @@ class MetricsClient:
             logger.error(f"Failed to send bulk metrics after {self.max_retries} retries: {str(e)}")
             return False
     
+    def _ensure_source(self) -> str:
+        """
+        Ensure a source exists, creating it if necessary.
+        
+        Returns:
+            str: UUID of the source
+        """
+        if self.source_id:
+            return self.source_id
+            
+        # First check if source already exists
+        try:
+            response = requests.get(
+                f"{self.server_url.rstrip('/')}/sources/".replace('/metrics/sources/', '/sources/'),
+                headers={'X-API-Key': self.api_key},
+                timeout=self.request_timeout
+            )
+            response.raise_for_status()
+            sources = response.json()
+            
+            # Check if our source exists
+            for source in sources:
+                if source.get('name') == self.source_name and source.get('is_active', True):
+                    self.source_id = source['id']
+                    logger.debug(f"Found existing source: {self.source_name} (ID: {self.source_id})")
+                    return self.source_id
+                    
+            # Create new source if not found
+            response = requests.post(
+                f"{self.server_url.rstrip('/')}/sources/".replace('/metrics/sources/', '/sources/'),
+                json={
+                    'name': self.source_name,
+                    'description': self.source_description or f"Source for {self.source_name}",
+                    'ip_address': self.source_ip,
+                    'is_active': True
+                },
+                headers={'X-API-Key': self.api_key},
+                timeout=self.request_timeout
+            )
+            response.raise_for_status()
+            source = response.json()
+            self.source_id = source['id']
+            logger.info(f"Created new source: {self.source_name} (ID: {self.source_id})")
+            return self.source_id
+            
+        except Exception as e:
+            logger.error(f"Failed to ensure source {self.source_name}: {str(e)}")
+            # Generate a temporary UUID for the source if we can't get it from the server
+            if not self.source_id:
+                self.source_id = str(uuid.uuid4())
+                logger.warning(f"Using temporary source ID: {self.source_id}")
+            return self.source_id
+            
     def send_metrics(self, metrics_data: Dict[str, Any]) -> bool:
         """
         Send metrics to the server. If sending fails, add to buffer.
@@ -277,7 +349,9 @@ class MetricsClient:
                     'name': 'metric_name',
                     'value': 123.45,
                     'unit': '%',
-                    'timestamp': '2023-01-01T12:00:00Z' (optional)
+                    'description': 'Description of the metric' (optional),
+                    'timestamp': '2023-01-01T12:00:00Z' (optional),
+                    'metadata': {'key1': 'value1', 'key2': 'value2'} (optional)
                 }
         
         Returns:
@@ -297,21 +371,29 @@ class MetricsClient:
             return False
         
         try:
-            # Ensure metric type exists
+            # Ensure metric type and source exist
             metric_type_id = self._ensure_metric_type(
                 metric_name, 
                 description=metrics_data.get('description'),
                 unit=metrics_data.get('unit')
             )
             
-            # Format for web app
+            source_id = self._ensure_source()
+            
+            # Format for web app according to new data model
             formatted_metric = {
                 'metric_type_id': metric_type_id,
+                'source_id': source_id,
                 'value': metrics_data.get('value'),
-                'recorded_at': metrics_data.get('timestamp') or datetime.now(pytz.UTC).isoformat(),
-                'source': metrics_data.get('source') or self.client_id,
-                'metric_metadata': metrics_data.get('metadata', {})
+                'recorded_at': metrics_data.get('timestamp') or datetime.now(pytz.UTC).isoformat()
             }
+            
+            # Add metadata if provided
+            metadata = metrics_data.get('metadata', {})
+            if metadata:
+                formatted_metric['metric_metadata_items'] = [
+                    {'key': key, 'value': str(value)} for key, value in metadata.items()
+                ]
             
             # Send current metrics
             if self._send_metrics(formatted_metric):
@@ -340,8 +422,8 @@ class MetricsClient:
             'name': metrics.get('name', 'unknown'),
             'value': metrics.get('value', 0),
             'unit': metrics.get('unit'),
+            'description': metrics.get('description'),
             'timestamp': datetime.now(pytz.UTC).isoformat(),
-            'source': metrics.get('source', self.client_id),
             'metadata': metrics.get('metadata', {})
         }
     
@@ -359,6 +441,9 @@ class MetricsClient:
                 headers={'X-API-Key': self.api_key},
                 timeout=self.request_timeout
             )
+            # Also try to ensure our source is registered
+            if response.status_code == 200:
+                self._ensure_source()
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False

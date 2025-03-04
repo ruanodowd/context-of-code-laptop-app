@@ -10,14 +10,17 @@ logger = logging.getLogger(__name__)
 class BusCollector(Collector):
     """Collector for bus arrival metrics."""
     
-    def __init__(self):
+    def __init__(self, from_stage_name: str, to_stage_name: str):
+        """
+        Initialize the bus collector for a specific route.
+        
+        Args:
+            from_stage_name (str): Full name of the origin bus stop
+            to_stage_name (str): Full name of the destination bus stop
+        """
         self.base_url = "https://ticketbooking.dublincoach.ie/MobileAPI/MobileBooking/GetJourneyList"
-        # Define common bus stops
-        self.stops = {
-            'ul_student_centre': "T310 UL Student Centre / Ionad na Mac Leinn",
-            'hazel_hall': "T310 Hazel Hall Estate",
-            'ul_east_gate': "T310 UL East Gate / An Geata Thoir"
-        }
+        self.from_stage_name = from_stage_name
+        self.to_stage_name = to_stage_name
         
     def _string_time_to_minutes(self, time: str) -> int:
         """Convert string time format to minutes
@@ -72,10 +75,18 @@ class BusCollector(Collector):
             response.raise_for_status()
             
             parsed_data = response.json()
-            if not parsed_data.get('Data', {}).get('JourneyList'):
+            
+            # Handle both list and dictionary responses
+            journey_list = None
+            if isinstance(parsed_data, dict):
+                journey_list = parsed_data.get('Data', {}).get('JourneyList', [])
+            elif isinstance(parsed_data, list):
+                journey_list = parsed_data
+            
+            if not journey_list:
                 raise ValueError("No journey data available")
                 
-            journey = parsed_data['Data']['JourneyList'][0]
+            journey = journey_list[0]
             if journey['JourneyID'] == 0:
                 raise ValueError("The bus has not departed yet")
                 
@@ -99,23 +110,16 @@ class BusCollector(Collector):
             raise
     
     def collect(self) -> Dict:
-        """Collect bus metrics for configured routes.
+        """Collect bus metrics for the configured route.
         
         Returns:
-            dict: Bus arrival information for all monitored routes
+            dict: Bus arrival information for the monitored route
         """
         try:
-            metrics = {
-                'to_ul': self._get_journey_info(
-                    self.stops['hazel_hall'],
-                    self.stops['ul_east_gate']
-                ),
-                'from_ul': self._get_journey_info(
-                    self.stops['ul_student_centre'],
-                    self.stops['hazel_hall']
-                )
-            }
-            return metrics
+            return self._get_journey_info(
+                self.from_stage_name,
+                self.to_stage_name
+            )
         except Exception as e:
             logger.error(f"Error collecting bus metrics: {str(e)}")
             raise RuntimeError(f"Error collecting bus metrics: {str(e)}")
