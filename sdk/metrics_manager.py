@@ -3,9 +3,10 @@ Metrics manager for handling collector registration and metric collection.
 """
 import logging
 from typing import Dict, List, Any, Optional
+from uuid import UUID
 
 from .collector import Collector
-from .metrics_sdk import MetricsClient, default_client
+from .metrics_sdk import MetricsClient, default_client, Unit
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class MetricsManager:
         """
         self.collectors: List[Collector] = []
         self.client = client or default_client
+        self.unit_manager = self.client.unit_manager
     
     def register_collector(self, collector: Collector) -> None:
         """
@@ -138,3 +140,82 @@ def get_buffered_count() -> int:
         int: Number of buffered metrics
     """
     return default_manager.get_buffered_count()
+
+
+# Unit management convenience functions
+def create_unit(name: str, symbol: str, description: Optional[str] = None) -> Unit:
+    """
+    Create a new unit using the default manager.
+    
+    Args:
+        name (str): Name of the unit
+        symbol (str): Symbol for the unit
+        description (str, optional): Description of the unit
+        
+    Returns:
+        Unit: The created unit
+    """
+    return default_manager.unit_manager.create_unit(name, symbol, description)
+
+
+def get_unit(unit_id: UUID) -> Unit:
+    """
+    Get a unit by ID using the default manager.
+    
+    Args:
+        unit_id (UUID): ID of the unit
+        
+    Returns:
+        Unit: The requested unit
+    """
+    return default_manager.unit_manager.get_unit(unit_id)
+
+
+def get_unit_by_symbol(symbol: str) -> Unit:
+    """
+    Get a unit by its symbol using the default manager.
+    
+    Args:
+        symbol (str): Symbol of the unit
+        
+    Returns:
+        Unit: The requested unit
+    """
+    return default_manager.unit_manager.get_unit_by_symbol(symbol)
+
+
+def list_units() -> List[Unit]:
+    """
+    List all available units using the default manager.
+    
+    Returns:
+        List[Unit]: List of all units
+    """
+    return default_manager.unit_manager.list_units()
+
+
+def update_unit(unit_id: UUID, **kwargs) -> Unit:
+    """
+    Update a unit's properties using the default manager.
+    
+    Args:
+        unit_id (UUID): ID of the unit to update
+        **kwargs: Properties to update (name, symbol, description)
+        
+    Returns:
+        Unit: The updated unit
+    """
+    return default_manager.unit_manager.update_unit(unit_id, **kwargs)
+
+
+def delete_unit(unit_id: UUID) -> bool:
+    """
+    Delete a unit if it's not referenced by any metric types using the default manager.
+    
+    Args:
+        unit_id (UUID): ID of the unit to delete
+        
+    Returns:
+        bool: True if deleted successfully
+    """
+    return default_manager.unit_manager.delete_unit(unit_id)

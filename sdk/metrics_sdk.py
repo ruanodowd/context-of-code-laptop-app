@@ -13,13 +13,168 @@ import os
 import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
+from uuid import UUID
 import pytz
 import requests
 from retrying import retry
+from dataclasses import dataclass
 
 from . import config
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Unit:
+    """Represents a measurement unit."""
+    id: UUID
+    name: str
+    symbol: str
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class UnitManager:
+    """Manager for handling unit operations."""
+    
+    def __init__(self, client: Optional['MetricsClient'] = None):
+        """Initialize the unit manager.
+        
+        Args:
+            client (MetricsClient, optional): The metrics client to use
+        """
+        self.client = client
+        
+    def register_unit(self, name: str, symbol: str, description: Optional[str] = None) -> Unit:
+        """Register a new unit if it doesn't exist.
+        Returns existing unit if name or symbol already registered.
+        
+        Args:
+            name (str): Name of the unit
+            symbol (str): Symbol for the unit
+            description (str, optional): Description of the unit
+            
+        Returns:
+            Unit: The created or existing unit
+            
+        Raises:
+            ValueError: If name or symbol is invalid
+            requests.RequestException: If server request fails
+        """
+        if not name or not symbol:
+            raise ValueError("Name and symbol are required")
+        
+        # First try to find by symbol
+        try:
+            return self.get_unit_by_symbol(symbol)
+        except requests.RequestException:
+            # If not found, create new unit
+            response = self.client._make_request(
+                'post',
+                '',  # Base units endpoint
+                is_units_endpoint=True,
+                json={
+                    'name': name,
+                    'symbol': symbol,
+                    'description': description
+                }
+            )
+            
+            return Unit(**response)
+    
+    # Alias for backward compatibility
+    create_unit = register_unit
+    
+    def get_unit(self, unit_id: UUID) -> Unit:
+        """Get a unit by ID.
+        
+        Args:
+            unit_id (UUID): ID of the unit
+            
+        Returns:
+            Unit: The requested unit
+            
+        Raises:
+            requests.RequestException: If server request fails
+        """
+        response = self.client._make_request('get', str(unit_id), is_units_endpoint=True)
+        return Unit(**response)
+    
+    def get_unit_by_symbol(self, symbol: str) -> Unit:
+        """Get a unit by its symbol.
+        
+        Args:
+            symbol (str): Symbol of the unit
+            
+        Returns:
+            Unit: The requested unit
+            
+        Raises:
+            requests.RequestException: If server request fails
+        """
+        response = self.client._make_request('get', f'symbol/{symbol}', is_units_endpoint=True)
+        return Unit(**response)
+    
+    def list_units(self) -> List[Unit]:
+        """List all available units.
+        
+        Returns:
+            List[Unit]: List of all units
+            
+        Raises:
+            requests.RequestException: If server request fails
+        """
+        response = self.client._make_request('get', '', is_units_endpoint=True)
+        return [Unit(**unit_data) for unit_data in response]
+    
+    def update_unit(self, unit_id: UUID, **kwargs) -> Unit:
+        """Update a unit's properties.
+        
+        Args:
+            unit_id (UUID): ID of the unit to update
+            **kwargs: Properties to update (name, symbol, description)
+            
+        Returns:
+            Unit: The updated unit
+            
+        Raises:
+            ValueError: If no valid properties are provided
+            requests.RequestException: If server request fails
+        """
+        valid_fields = {'name', 'symbol', 'description'}
+        update_data = {k: v for k, v in kwargs.items() if k in valid_fields}
+        
+        if not update_data:
+            raise ValueError("No valid properties provided for update")
+            
+        response = self.client._make_request(
+            'patch',
+            str(unit_id),
+            is_units_endpoint=True,
+            json=update_data
+        )
+        
+        return Unit(**response)
+    
+    def delete_unit(self, unit_id: UUID) -> bool:
+        """Delete a unit if it's not referenced by any metric types.
+        
+        Args:
+            unit_id (UUID): ID of the unit to delete
+            
+        Returns:
+            bool: True if deleted successfully
+            
+        Raises:
+            requests.RequestException: If server request fails or unit is in use
+        """
+        try:
+            self.client._make_request('delete', str(unit_id), is_units_endpoint=True)
+            return True
+        except requests.RequestException as e:
+            if e.response and e.response.status_code == 409:
+                raise ValueError("Cannot delete unit: it is referenced by existing metric types")
+            raise
 
 class MetricsBuffer:
     """Buffer for storing metrics when server is unavailable."""
@@ -136,6 +291,8 @@ class MetricsClient:
         self.metric_types = {}
         # Store source id
         self.source_id = None
+        # Initialize unit manager
+        self.unit_manager = UnitManager(self)
         
         # Load metric types and ensure source exists
         self._load_metric_types()
@@ -156,28 +313,61 @@ class MetricsClient:
     def _load_metric_types(self) -> None:
         """Load available metric types from the server."""
         try:
-            response = requests.get(
-                f"{self.server_url.rstrip('/')}/metric-types/".replace('/metrics/metric-types/', '/metric-types/'),
-                headers={'X-API-Key': self.api_key},
-                timeout=self.request_timeout
-            )
-            response.raise_for_status()
-            metric_types = response.json()
+            response = self._make_request('get', '', is_metric_types_endpoint=True)
             
             # Map name to id for easy lookup
-            self.metric_types = {mt['name']: mt['id'] for mt in metric_types if mt.get('is_active', True)}
+            self.metric_types = {mt['name']: mt['id'] for mt in response if mt.get('is_active', True)}
             logger.debug(f"Loaded {len(self.metric_types)} active metric types from server")
         except Exception as e:
             logger.warning(f"Failed to load metric types: {str(e)}")
     
-    def _ensure_metric_type(self, name: str, description: str = None, unit: str = None) -> str:
+    def _make_request(self, method: str, endpoint: str, is_units_endpoint: bool = False, is_metric_types_endpoint: bool = False, **kwargs) -> Any:
+        """Make a request to the server.
+        
+        Args:
+            method (str): HTTP method
+            endpoint (str): API endpoint
+            is_units_endpoint (bool): If True, use /api/units instead of /api/metrics
+            is_metric_types_endpoint (bool): If True, use /api/metric-types instead of /api/metrics
+            **kwargs: Additional request arguments
+            
+        Returns:
+            Any: Response data
+            
+        Raises:
+            requests.RequestException: If request fails
+        """
+        # Ensure proper API path structure based on endpoint type
+        if is_units_endpoint:
+            base_path = 'units'
+        elif is_metric_types_endpoint:
+            base_path = 'metric-types'
+        else:
+            base_path = 'metrics'
+            
+        # Construct URL with proper path
+        url = f"{self.server_url.rstrip('/')}/api/{base_path}/{endpoint}"
+        headers = {'X-API-Key': self.api_key}
+        
+        if 'headers' in kwargs:
+            kwargs['headers'].update(headers)
+        else:
+            kwargs['headers'] = headers
+            
+        kwargs['timeout'] = self.request_timeout
+        
+        response = requests.request(method, url, **kwargs)
+        response.raise_for_status()
+        return response.json()
+    
+    def _ensure_metric_type(self, name: str, description: str = None, unit_id: Optional[UUID] = None) -> str:
         """
         Ensure a metric type exists, creating it if necessary.
         
         Args:
             name (str): Name of the metric type
             description (str, optional): Description of the metric type
-            unit (str, optional): Unit of measurement
+            unit_id (UUID, optional): ID of the associated unit
             
         Returns:
             str: UUID of the metric type
@@ -187,18 +377,17 @@ class MetricsClient:
         
         # Create new metric type
         try:
-            response = requests.post(
-                f"{self.server_url.rstrip('/')}/metric-types/".replace('/metrics/metric-types/', '/metric-types/'),
+            response = self._make_request(
+                'post',
+                '',
+                is_metric_types_endpoint=True,
                 json={
                     'name': name,
                     'description': description or f"Metric type for {name}",
-                    'unit': unit,
+                    'unit_id': str(unit_id) if unit_id else None,
                     'is_active': True
-                },
-                headers={'X-API-Key': self.api_key},
-                timeout=self.request_timeout
+                }
             )
-            response.raise_for_status()
             metric_type = response.json()
             self.metric_types[name] = metric_type['id']
             logger.info(f"Created new metric type: {name} (ID: {metric_type['id']})")
@@ -229,7 +418,7 @@ class MetricsClient:
         )
         def _send_request():
             response = requests.post(
-                self.server_url,
+                f"{self.server_url.rstrip('/')}/api/metrics/",
                 json=metrics_data,
                 headers=headers,
                 timeout=self.request_timeout
@@ -253,14 +442,15 @@ class MetricsClient:
         Returns:
             bool: True if successful, False otherwise
         """
-        bulk_url = f"{self.server_url.rstrip('/')}/bulk"
+        bulk_url = f"{self.server_url.rstrip('/')}/api/metrics/bulk"
         
         headers = {
             'Content-Type': 'application/json',
             'X-API-Key': self.api_key
         }
         
-        # Format for bulk endpoint
+        # Format for bulk endpoint according to API spec
+        # The API expects a MetricBulkCreate object with a 'metrics' array of MetricCreate objects
         bulk_data = {
             'metrics': metrics_list
         }
@@ -299,7 +489,7 @@ class MetricsClient:
         # First check if source already exists
         try:
             response = requests.get(
-                f"{self.server_url.rstrip('/')}/sources/".replace('/metrics/sources/', '/sources/'),
+                f"{self.server_url.rstrip('/')}/api/sources/",
                 headers={'X-API-Key': self.api_key},
                 timeout=self.request_timeout
             )
@@ -315,7 +505,7 @@ class MetricsClient:
                     
             # Create new source if not found
             response = requests.post(
-                f"{self.server_url.rstrip('/')}/sources/".replace('/metrics/sources/', '/sources/'),
+                f"{self.server_url.rstrip('/')}/api/sources/",
                 json={
                     'name': self.source_name,
                     'description': self.source_description or f"Source for {self.source_name}",
@@ -371,16 +561,30 @@ class MetricsClient:
             return False
         
         try:
+            # Handle unit if provided
+            unit_id = None
+            if unit_symbol := metrics_data.get('unit'):
+                try:
+                    unit = self.unit_manager.register_unit(
+                        name=f"Unit for {unit_symbol}",
+                        symbol=unit_symbol,
+                        description=f"Unit for {unit_symbol} measurements"
+                    )
+                    unit_id = unit.id
+                except Exception as e:
+                    logger.error(f"Failed to register unit for symbol '{unit_symbol}': {str(e)}")
+            
             # Ensure metric type and source exist
             metric_type_id = self._ensure_metric_type(
                 metric_name, 
                 description=metrics_data.get('description'),
-                unit=metrics_data.get('unit')
+                unit_id=unit_id
             )
             
             source_id = self._ensure_source()
             
             # Format for web app according to new data model
+            # The API expects a MetricCreate object with specific fields
             formatted_metric = {
                 'metric_type_id': metric_type_id,
                 'source_id': source_id,
@@ -391,7 +595,8 @@ class MetricsClient:
             # Add metadata if provided
             metadata = metrics_data.get('metadata', {})
             if metadata:
-                formatted_metric['metric_metadata_items'] = [
+                # Convert metadata to the expected format: list of MetadataCreate objects
+                formatted_metric['metadata'] = [
                     {'key': key, 'value': str(value)} for key, value in metadata.items()
                 ]
             
@@ -437,7 +642,7 @@ class MetricsClient:
         try:
             # Try to get metric types as a health check
             response = requests.get(
-                f"{self.server_url.rstrip('/')}/metric-types/".replace('/metrics/metric-types/', '/metric-types/'),
+                f"{self.server_url.rstrip('/')}/api/metric-types/",
                 headers={'X-API-Key': self.api_key},
                 timeout=self.request_timeout
             )
