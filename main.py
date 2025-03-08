@@ -202,7 +202,7 @@ def main():
                         help='Log level')
     parser.add_argument('--interval', type=int, default=60,
                         help='Interval between collections in seconds')
-    parser.add_argument('--count', type=int, default=1,
+    parser.add_argument('--count', type=int, default=0,
                         help='Number of collection rounds (0 for infinite)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Do not send metrics to server, just log them')

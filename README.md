@@ -188,12 +188,12 @@ The repository includes a command-line interface (CLI) application (`new_main.py
 
 #### Collect All Metrics with Custom Source Name
 ```bash
-./new_main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --source-name "my-laptop" --source-description "My Personal Laptop"
+./main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --source-name "my-laptop" --source-description "My Personal Laptop"
 ```
 
 #### Dry Run to Test Configuration
 ```bash
-./new_main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --dry-run
+./main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --dry-run
 ```
 
 ## Command Relay System
@@ -205,13 +205,39 @@ The application includes a command relay system that allows the client to receiv
 - `shutdown_wsl`: Shuts down the Windows Subsystem for Linux
 - `ping`: Simple ping command for testing connectivity
 
+### Command Format
+
+Commands sent from the server to the client should follow this format:
+
+```json
+{
+  "id": "unique-command-id",
+  "command_type": "ping",
+  "params": {}
+}
+```
+
+Or alternatively:
+
+```json
+{
+  "command_id": "unique-command-id",
+  "command": "ping",
+  "params": {}
+}
+```
+
+The client will handle both formats.
+
 ### Usage
 
 To enable the command relay system, use the following options:
 
 ```bash
-./main.py --enable-command-relay --command-server-url "https://your-server.com/api" --poll-interval 30 --collect-battery
+./main.py --enable-command-relay --command-server-url "http://localhost:8000" --poll-interval 30 --collect-battery
 ```
+
+**Note**: The command server URL should be the base URL of your server (e.g., `http://localhost:8000`). The client will automatically append the API paths.
 
 ### Command Relay Options
 

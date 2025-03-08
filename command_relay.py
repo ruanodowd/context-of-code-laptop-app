@@ -140,7 +140,7 @@ class CommandRelayClient:
             poll_interval (int): Seconds between polling for commands
             last_command_id (str, optional): ID of the last processed command
         """
-        self.server_url = server_url or os.environ.get("COMMAND_SERVER_URL", "https://your-server.com/api")
+        self.server_url = server_url or os.environ.get("COMMAND_SERVER_URL", "http://localhost:8000")
         self.api_key = api_key or os.environ.get("COMMAND_API_KEY", config.API_KEY)
         self.client_id = client_id or os.environ.get("CLIENT_ID", str(uuid.uuid4()))
         self.poll_interval = poll_interval
@@ -180,18 +180,17 @@ class CommandRelayClient:
     def _poll_commands(self) -> None:
         """Poll for commands from the server."""
         headers = {
-            "X-API-Key": self.api_key,
-            "X-Client-ID": self.client_id,
+            "x-api-key": self.api_key,
             "Content-Type": "application/json"
         }
         
-        params = {}
-        if self.last_command_id:
-            params["after_id"] = self.last_command_id
+        params = {
+            "client_id": self.client_id
+        }
         
         try:
             response = requests.get(
-                f"{self.server_url.rstrip('/')}/commands/pending",
+                f"{self.server_url.rstrip('/')}/api/commands/pending",
                 headers=headers,
                 params=params,
                 timeout=30
@@ -202,12 +201,22 @@ class CommandRelayClient:
                 
                 if commands:
                     logger.info(f"Received {len(commands)} new command(s)")
+                    logger.debug(f"Command data: {commands}")
                     
                     for cmd in commands:
-                        command_id = cmd.get("id")
-                        command = cmd.get("command")
+                        # Extract command details - handle different possible formats
+                        command_id = cmd.get("id") or cmd.get("command_id")
+                        command = cmd.get("command_type") or cmd.get("command")
                         params = cmd.get("params", {})
                         
+                        # Debug log the raw command data
+                        logger.debug(f"Raw command data: {cmd}")
+                        
+                        # Skip commands with missing ID or command type
+                        if not command_id or not command:
+                            logger.warning(f"Skipping command with missing ID or command type: {cmd}")
+                            continue
+                            
                         logger.info(f"Processing command: {command} (ID: {command_id})")
                         
                         # Execute the command
@@ -245,12 +254,12 @@ class CommandRelayClient:
             bool: True if successful, False otherwise
         """
         headers = {
-            "X-API-Key": self.api_key,
-            "X-Client-ID": self.client_id,
+            "x-api-key": self.api_key,
             "Content-Type": "application/json"
         }
         
         data = {
+            "client_id": self.client_id,
             "command_id": command_id,
             "result": result,
             "timestamp": time.time()
@@ -258,7 +267,7 @@ class CommandRelayClient:
         
         try:
             response = requests.post(
-                f"{self.server_url.rstrip('/')}/commands/results",
+                f"{self.server_url.rstrip('/')}/api/commands/results",
                 headers=headers,
                 json=data,
                 timeout=30
@@ -283,12 +292,12 @@ class CommandRelayClient:
             bool: True if successful, False otherwise
         """
         headers = {
-            "X-API-Key": self.api_key,
-            "X-Client-ID": self.client_id,
+            "x-api-key": self.api_key,
             "Content-Type": "application/json"
         }
         
         data = {
+            "client_id": self.client_id,
             "timestamp": time.time(),
             "status": "active",
             "last_command_id": self.last_command_id
@@ -296,7 +305,7 @@ class CommandRelayClient:
         
         try:
             response = requests.post(
-                f"{self.server_url.rstrip('/')}/clients/heartbeat",
+                f"{self.server_url.rstrip('/')}/api/clients/heartbeat",
                 headers=headers,
                 json=data,
                 timeout=30
@@ -340,20 +349,29 @@ class CommandRelayClient:
             bool: True if successful, False otherwise
         """
         headers = {
-            "X-API-Key": self.api_key,
+            "x-api-key": self.api_key,
             "Content-Type": "application/json"
         }
         
+        # Try to get a meaningful hostname
+        hostname = os.environ.get("HOSTNAME", None)
+        if not hostname:
+            try:
+                import socket
+                hostname = socket.gethostname()
+            except:
+                hostname = "unknown"
+                
         data = {
             "client_id": self.client_id,
             "client_type": "metrics_client",
-            "hostname": os.environ.get("HOSTNAME", "unknown"),
+            "hostname": hostname,
             "timestamp": time.time()
         }
         
         try:
             response = requests.post(
-                f"{self.server_url.rstrip('/')}/clients/register",
+                f"{self.server_url.rstrip('/')}/api/clients/register",
                 headers=headers,
                 json=data,
                 timeout=30
