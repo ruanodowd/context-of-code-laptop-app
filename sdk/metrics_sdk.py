@@ -83,7 +83,7 @@ class UnitManager:
                 
                 return Unit(**response)
             except requests.exceptions.RequestException as e:
-                logger.error(f"Error creating unit with symbol '{symbol}': {str(e)}")
+                logger.error("Error creating unit with symbol '%s': %s", symbol, str(e))
                 # If we can't register, create a temporary unit object
                 return Unit(
                     id=uuid.uuid4(),
@@ -134,7 +134,7 @@ class UnitManager:
             # If we didn't find a matching unit, raise an exception
             raise requests.RequestException(f"Unit with symbol '{symbol}' not found")
         except requests.RequestException as e:
-            logger.error(f"Error finding unit with symbol '{symbol}': {str(e)}")
+            logger.error("Error finding unit with symbol '%s': %s", symbol, str(e))
             raise
     
     def list_units(self) -> List[Unit]:
@@ -247,7 +247,7 @@ class MetricsBuffer:
             with open(self.buffer_file, 'w') as f:
                 json.dump(self.buffer, f)
         except IOError as e:
-            logger.error(f"Failed to save buffer: {str(e)}")
+            logger.error("Failed to save buffer: %s", str(e))
     
     def _load_buffer(self) -> None:
         """Load buffer from disk if it exists."""
@@ -257,7 +257,7 @@ class MetricsBuffer:
                     data = json.load(f)
                     self.buffer = data
             except (IOError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to load buffer: {str(e)}")
+                logger.error("Failed to load buffer: %s", str(e))
                 
     def __len__(self) -> int:
         """
@@ -339,9 +339,9 @@ class MetricsClient:
             
             # Map name to id for easy lookup
             self.metric_types = {mt['name']: mt['id'] for mt in response if mt.get('is_active', True)}
-            logger.debug(f"Loaded {len(self.metric_types)} active metric types from server")
+            logger.debug("Loaded %s active metric types from server", len(self.metric_types))
         except Exception as e:
-            logger.warning(f"Failed to load metric types: {str(e)}")
+            logger.warning("Failed to load metric types: %s", str(e))
     
     def _make_request(self, method: str, endpoint: str, is_units_endpoint: bool = False, is_metric_types_endpoint: bool = False, **kwargs) -> Any:
         """Make a request to the server.
@@ -412,10 +412,10 @@ class MetricsClient:
             )
             metric_type = response.json()
             self.metric_types[name] = metric_type['id']
-            logger.info(f"Created new metric type: {name} (ID: {metric_type['id']})")
+            logger.info("Created new metric type: %s (ID: %s)", name, metric_type['id'])
             return metric_type['id']
         except Exception as e:
-            logger.error(f"Failed to create metric type {name}: {str(e)}")
+            logger.error("Failed to create metric type %s: %s", name, str(e))
             raise
     
     def _send_metrics(self, metrics_data: Dict[str, Any]) -> bool:
@@ -451,10 +451,10 @@ class MetricsClient:
         
         try:
             result = _send_request()
-            logger.debug(f"Successfully sent metric: {result}")
+            logger.debug("Successfully sent metric: %s", result)
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send metrics after {self.max_retries} retries: {str(e)}")
+            logger.error("Failed to send metrics after %s retries: %s", self.max_retries, str(e))
             return False
     
     def _send_metrics_bulk(self, metrics_list: List[Dict[str, Any]]) -> bool:
@@ -498,7 +498,7 @@ class MetricsClient:
         try:
             return _send_bulk_request()
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send bulk metrics after {self.max_retries} retries: {str(e)}")
+            logger.error("Failed to send bulk metrics after %s retries: %s", self.max_retries, str(e))
             return False
     
     def _ensure_source(self) -> str:
@@ -525,7 +525,7 @@ class MetricsClient:
             for source in sources:
                 if source.get('name') == self.source_name and source.get('is_active', True):
                     self.source_id = source['id']
-                    logger.debug(f"Found existing source: {self.source_name} (ID: {self.source_id})")
+                    logger.debug("Found existing source: %s (ID: %s)", self.source_name, self.source_id)
                     return self.source_id
                     
             # Create new source if not found
@@ -543,15 +543,15 @@ class MetricsClient:
             response.raise_for_status()
             source = response.json()
             self.source_id = source['id']
-            logger.info(f"Created new source: {self.source_name} (ID: {self.source_id})")
+            logger.info("Created new source: %s (ID: %s)", self.source_name, self.source_id)
             return self.source_id
             
         except Exception as e:
-            logger.error(f"Failed to ensure source {self.source_name}: {str(e)}")
+            logger.error("Failed to ensure source %s: %s", self.source_name, str(e))
             # Generate a temporary UUID for the source if we can't get it from the server
             if not self.source_id:
                 self.source_id = str(uuid.uuid4())
-                logger.warning(f"Using temporary source ID: {self.source_id}")
+                logger.warning("Using temporary source ID: %s", self.source_id)
             return self.source_id
             
     def send_metrics(self, metrics_data: Dict[str, Any]) -> bool:
@@ -577,7 +577,7 @@ class MetricsClient:
             buffered_metrics = self.buffer.get_all()
             if self._send_metrics_bulk(buffered_metrics):
                 self.buffer.clear()
-                logger.info(f"Successfully sent {len(buffered_metrics)} buffered metrics")
+                logger.info("Successfully sent %s buffered metrics", len(buffered_metrics))
         
         # Format for web app compatibility
         metric_name = metrics_data.get('name')
@@ -604,7 +604,7 @@ class MetricsClient:
                     )
                     unit_id = unit.id
                 except Exception as e:
-                    logger.warning(f"Failed to register unit for symbol '{unit_symbol}': {str(e)}")
+                    logger.warning("Failed to register unit for symbol '%s': %s", unit_symbol, str(e))
                     # Create a temporary UUID for the unit so we can continue
                     unit_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"unit-{unit_symbol}"))
             
@@ -616,14 +616,14 @@ class MetricsClient:
                     unit_id=unit_id
                 )
             except Exception as e:
-                logger.warning(f"Failed to ensure metric type: {str(e)}")
+                logger.warning("Failed to ensure metric type: %s", str(e))
                 # Create a temporary UUID for the metric type
                 metric_type_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, metric_name))
             
             try:
                 source_id = self._ensure_source()
             except Exception as e:
-                logger.warning(f"Failed to ensure source: {str(e)}")
+                logger.warning("Failed to ensure source: %s", str(e))
                 # Create a temporary UUID for the source
                 source_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, self.source_name))
             
@@ -646,15 +646,15 @@ class MetricsClient:
             
             # Send current metrics
             if self._send_metrics(formatted_metric):
-                logger.info(f"Successfully sent metric: {metric_name}")
+                logger.info("Successfully sent metric: %s", metric_name)
                 return True
             else:
                 self.buffer.add(formatted_metric)
-                logger.warning(f"Failed to send metric: {metric_name}, added to buffer")
+                logger.warning("Failed to send metric: %s, added to buffer", metric_name)
                 return False
                 
         except Exception as e:
-            logger.error(f"Error sending metric {metric_name}: {str(e)}")
+            logger.error("Error sending metric %s: %s", metric_name, str(e))
             # Even if we failed to format properly, try to buffer the metric with basic info
             try:
                 self.buffer.add({
@@ -664,9 +664,9 @@ class MetricsClient:
                     'recorded_at': datetime.now(pytz.UTC).isoformat(),
                     'metadata': [{'key': k, 'value': str(v)} for k, v in metrics_data.get('metadata', {}).items()]
                 })
-                logger.warning(f"Added failed metric {metric_name} to buffer")
+                logger.warning("Added failed metric %s to buffer", metric_name)
             except Exception as buffer_err:
-                logger.error(f"Failed to buffer metric: {str(buffer_err)}")
+                logger.error("Failed to buffer metric: %s", str(buffer_err))
             return False
     
     def create_metrics_batch(self, metrics: Dict[str, Any]) -> Dict[str, Any]:

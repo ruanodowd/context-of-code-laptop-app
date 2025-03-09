@@ -17,7 +17,7 @@ class BatteryCollector(Collector):
         try:
             with open('/proc/version', 'r') as f:
                 return 'microsoft' in f.read().lower()
-        except:
+        except IOError:
             return False
     
     def collect(self):
@@ -31,7 +31,7 @@ class BatteryCollector(Collector):
                 return self._collect_wsl()
             return self._collect_linux()
         except Exception as e:
-            logger.error(f"Error collecting battery metrics: {str(e)}")
+            logger.error("Error collecting battery metrics: %s", str(e))
             raise RuntimeError(f"Error collecting battery metrics: {str(e)}")
     
     def _collect_wsl(self):
@@ -64,10 +64,12 @@ class BatteryCollector(Collector):
             with open(os.path.join(self.battery_path, 'status'), 'r') as f:
                 status = f.read().strip()
             
+            # Include charging status in the output
             is_charging = status == "Charging"
             
             return {
                 'metric': percentage,
+                'is_charging': is_charging,
                 'timestamp': None  # Will be added by aggregator
             }
         except FileNotFoundError:
@@ -79,4 +81,4 @@ if __name__ == '__main__':
     if 'error' in battery_info:
         print(battery_info['error'])
     else:
-        print(f"Battery percentage: {battery_info['metric']}%")
+        print("Battery percentage: %s%%" % battery_info['metric'])

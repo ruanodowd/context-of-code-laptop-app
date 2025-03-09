@@ -1,7 +1,6 @@
 """
 HTTP client for sending metrics to the server.
 """
-import json
 import logging
 from datetime import datetime
 import pytz
@@ -47,7 +46,7 @@ def send_metrics(metrics_data):
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to send metrics: {str(e)}")
+        logger.error("Failed to send metrics: %s", str(e))
         raise  # Let the retry decorator handle it
     
 def health_check():

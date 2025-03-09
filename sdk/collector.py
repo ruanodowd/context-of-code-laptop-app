@@ -44,5 +44,5 @@ class Collector(ABC):
         try:
             return self.collect()
         except Exception as e:
-            logger.error(f"Error collecting metrics from {self.name}: {str(e)}")
+            logger.error("Error collecting metrics from %s: %s", self.name, str(e))
             return {'error': str(e)}

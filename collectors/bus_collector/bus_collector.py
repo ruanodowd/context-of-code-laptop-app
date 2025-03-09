@@ -2,7 +2,7 @@ import json
 import logging
 import requests
 from requests.exceptions import RequestException
-from typing import Dict, Optional
+from typing import Dict
 from sdk.collector import Collector
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class BusCollector(Collector):
                 return int(time_parts[0]) * 60 + int(time_parts[2])
             return int(time_parts[0])  # Format: "29 min"
         except (IndexError, ValueError) as e:
-            logger.error(f"Error parsing time string '{time}': {str(e)}")
+            logger.error("Error parsing time string '%s': %s", time, str(e))
             raise ValueError(f"Invalid time format: {time}")
     
     def _get_journey_info(self, origin: str, destination: str) -> Dict:
@@ -70,7 +70,7 @@ class BusCollector(Collector):
         }
         
         try:
-            logger.debug(f"Fetching bus data for {origin} to {destination}")
+            logger.debug("Fetching bus data for %s to %s", origin, destination)
             response = requests.get(self.base_url, params=params, timeout=10)
             response.raise_for_status()
             
@@ -91,7 +91,7 @@ class BusCollector(Collector):
                 raise ValueError("The bus has not departed yet")
                 
             minutes = self._string_time_to_minutes(journey['LeavingIn'])
-            logger.debug(f"Bus from {origin} to {destination} arriving in {minutes} minutes")
+            logger.debug("Bus from %s to %s arriving in %s minutes", origin, destination, minutes)
             
             return {
                 'minutes_until_arrival': minutes,
@@ -100,13 +100,13 @@ class BusCollector(Collector):
             }
             
         except RequestException as e:
-            logger.error(f"API request failed: {str(e)}")
+            logger.error("API request failed: %s", str(e))
             raise
         except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Error parsing API response: {str(e)}")
+            logger.error("Error parsing API response: %s", str(e))
             raise ValueError(f"Invalid API response: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error getting bus arrival time: {str(e)}")
+            logger.error("Unexpected error getting bus arrival time: %s", str(e))
             raise
     
     def collect(self) -> Dict:
@@ -121,7 +121,7 @@ class BusCollector(Collector):
                 self.to_stage_name
             )
         except Exception as e:
-            logger.error(f"Error collecting bus metrics: {str(e)}")
+            logger.error("Error collecting bus metrics: %s", str(e))
             raise RuntimeError(f"Error collecting bus metrics: {str(e)}")
 
 if __name__ == '__main__':
@@ -133,10 +133,10 @@ if __name__ == '__main__':
     try:
         metrics = collector.safe_collect()
         if 'error' in metrics:
-            print(f"Error: {metrics['error']}")
+            print("Error: %s" % metrics['error'])
         else:
             print("Bus Metrics:")
-            print(f"To UL: {metrics['to_ul']['minutes_until_arrival']} minutes")
-            print(f"From UL: {metrics['from_ul']['minutes_until_arrival']} minutes")
+            print("To UL: %s minutes" % metrics['to_ul']['minutes_until_arrival'])
+            print("From UL: %s minutes" % metrics['from_ul']['minutes_until_arrival'])
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print("Error: %s" % str(e))

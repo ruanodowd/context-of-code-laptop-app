@@ -34,7 +34,7 @@ class MetricsManager:
             collector (Collector): The collector to register
         """
         self.collectors.append(collector)
-        logger.debug(f"Registered collector: {collector.name}")
+        logger.debug("Registered collector: %s", collector.name)
     
     def register_collectors(self, collectors: List[Collector]) -> None:
         """
@@ -60,7 +60,7 @@ class MetricsManager:
                 collector_name = collector.name
                 metrics[collector_name] = collector.safe_collect()
             except Exception as e:
-                logger.error(f"Error collecting metrics from {collector_name}: {str(e)}")
+                logger.error("Error collecting metrics from %s: %s", collector_name, str(e))
                 metrics[collector_name] = {'error': str(e)}
         
         return metrics

@@ -74,10 +74,10 @@ def collect_battery_metrics(args: argparse.Namespace) -> Optional[Dict[str, Any]
     battery_metric = battery_collector.safe_collect()
     
     if 'error' in battery_metric:
-        logger.error(f"Battery collection error: {battery_metric['error']}")
+        logger.error("Battery collection error: %s", battery_metric['error'])
         return None
         
-    logger.info(f"Battery: {battery_metric['metric']}%")
+    logger.info("Battery: %s%%", battery_metric['metric'])
     
     metrics_data = {
         'name': 'battery_percentage',
@@ -91,7 +91,7 @@ def collect_battery_metrics(args: argparse.Namespace) -> Optional[Dict[str, Any]
     }
     
     if args.dry_run:
-        logger.info(f"DRY RUN: Would send battery metrics: {metrics_data}")
+        logger.info("DRY RUN: Would send battery metrics: %s", metrics_data)
     else:
         metrics_sdk.send_metrics(metrics_data)
         
@@ -125,10 +125,10 @@ def collect_bus_metrics(args: argparse.Namespace) -> List[Dict[str, Any]]:
             bus_metrics = bus_collector.safe_collect()
             
             if 'error' in bus_metrics:
-                logger.error(f"Bus collection error for {from_stop} to {to_stop}: {bus_metrics['error']}")
+                logger.error("Bus collection error for %s to %s: %s", from_stop, to_stop, bus_metrics['error'])
                 continue
                 
-            logger.info(f"Bus from {from_stop} to {to_stop}: {bus_metrics['minutes_until_arrival']} minutes")
+            logger.info("Bus from %s to %s: %s minutes", from_stop, to_stop, bus_metrics['minutes_until_arrival'])
             
             # Create a unique name for this route
             route_name = f"{from_stop.replace(' ', '_')}_to_{to_stop.replace(' ', '_')}_bus_time"
@@ -149,14 +149,14 @@ def collect_bus_metrics(args: argparse.Namespace) -> List[Dict[str, Any]]:
             }
             
             if args.dry_run:
-                logger.info(f"DRY RUN: Would send bus metrics: {metrics_data}")
+                logger.info("DRY RUN: Would send bus metrics: %s", metrics_data)
             else:
                 metrics_sdk.send_metrics(metrics_data)
                 
             results.append(bus_metrics)
             
         except ValueError as e:
-            logger.error(f"Invalid bus route format: {route}. Use 'from_stop:to_stop'. Error: {e}")
+            logger.error("Invalid bus route format: %s. Use 'from_stop:to_stop'. Error: %s", route, e)
             
     return results
 
@@ -184,7 +184,7 @@ def collect_all_metrics(args: argparse.Namespace) -> Dict[str, Any]:
         results['bus'] = collect_bus_metrics(args)
         
     except Exception as e:
-        logger.error(f"Error collecting metrics: {e}")
+        logger.error("Error collecting metrics: %s", e)
         
     return results
 
@@ -274,13 +274,13 @@ def main():
     try:
         while args.count == 0 or round_count < args.count:
             round_count += 1
-            logger.info(f"Collection round {round_count}" + 
-                        (f"/{args.count}" if args.count > 0 else ""))
+            logger.info("Collection round %s%s", round_count, 
+                        ("/%s" % args.count if args.count > 0 else ""))
             
             collect_all_metrics(args)
             
             if args.count == 0 or round_count < args.count:
-                logger.info(f"Waiting {args.interval} seconds until next collection...")
+                logger.info("Waiting %s seconds until next collection...", args.interval)
                 time.sleep(args.interval)
     
     except KeyboardInterrupt:
@@ -289,7 +289,7 @@ def main():
     # Check if there are any buffered metrics
     buffered_count = metrics_sdk.get_buffered_count()
     if buffered_count > 0:
-        logger.info(f"There are {buffered_count} metrics in the buffer.")
+        logger.info("There are %s metrics in the buffer.", buffered_count)
     
     # Stop command relay if it was started
     if args.enable_command_relay:

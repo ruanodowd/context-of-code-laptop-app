@@ -45,20 +45,20 @@ class CommandExecutor:
             dict: Result of the command execution
         """
         if command not in self.command_handlers:
-            logger.warning(f"Unknown command: {command}")
+            logger.warning("Unknown command: %s", command)
             return {
                 "status": "error",
-                "message": f"Unknown command: {command}"
+                "message": "Unknown command: {}".format(command)
             }
         
         try:
             handler = self.command_handlers[command]
             return handler(params or {})
         except Exception as e:
-            logger.error(f"Error executing command {command}: {str(e)}")
+            logger.error("Error executing command %s: %s", command, str(e))
             return {
                 "status": "error",
-                "message": f"Error executing command: {str(e)}"
+                "message": "Error executing command: {}".format(str(e))
             }
     
     def _handle_shutdown_wsl(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -89,7 +89,7 @@ class CommandExecutor:
             else:
                 return {
                     "status": "error",
-                    "message": f"WSL shutdown failed: {result.stderr}"
+                    "message": "WSL shutdown failed: {}".format(result.stderr)
                 }
         except subprocess.TimeoutExpired:
             return {
@@ -99,7 +99,7 @@ class CommandExecutor:
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Error during WSL shutdown: {str(e)}"
+                "message": "Error during WSL shutdown: {}".format(str(e))
             }
     
     def _handle_ping(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,9 +161,9 @@ class CommandRelayClient:
                 with open(self.state_file, 'r') as f:
                     state = json.load(f)
                     self.last_command_id = state.get("last_command_id", self.last_command_id)
-                    logger.debug(f"Loaded state: last_command_id={self.last_command_id}")
+                    logger.debug("Loaded state: last_command_id=%s", self.last_command_id)
             except (IOError, json.JSONDecodeError) as e:
-                logger.error(f"Failed to load state: {str(e)}")
+                logger.error("Failed to load state: %s", str(e))
     
     def _save_state(self) -> None:
         """Save the state to file."""
@@ -175,7 +175,7 @@ class CommandRelayClient:
                     "updated_at": time.time()
                 }, f)
         except IOError as e:
-            logger.error(f"Failed to save state: {str(e)}")
+            logger.error("Failed to save state: %s", str(e))
     
     def _poll_commands(self) -> None:
         """Poll for commands from the server."""
@@ -200,8 +200,8 @@ class CommandRelayClient:
                 commands = response.json()
                 
                 if commands:
-                    logger.info(f"Received {len(commands)} new command(s)")
-                    logger.debug(f"Command data: {commands}")
+                    logger.info("Received %s new command(s)", len(commands))
+                    logger.debug("Command data: %s", commands)
                     
                     for cmd in commands:
                         # Extract command details - handle different possible formats
@@ -210,14 +210,14 @@ class CommandRelayClient:
                         params = cmd.get("params", {})
                         
                         # Debug log the raw command data
-                        logger.debug(f"Raw command data: {cmd}")
+                        logger.debug("Raw command data: %s", cmd)
                         
                         # Skip commands with missing ID or command type
                         if not command_id or not command:
-                            logger.warning(f"Skipping command with missing ID or command type: {cmd}")
+                            logger.warning("Skipping command with missing ID or command type: %s", cmd)
                             continue
                             
-                        logger.info(f"Processing command: {command} (ID: {command_id})")
+                        logger.info("Processing command: %s (ID: %s)", command, command_id)
                         
                         # Execute the command
                         result = self.executor.execute_command(command, params)
@@ -237,10 +237,10 @@ class CommandRelayClient:
             elif response.status_code == 404:
                 logger.error("Command endpoint not found. Check your server URL.")
             else:
-                logger.error(f"Failed to poll commands: {response.status_code} - {response.text}")
+                logger.error("Failed to poll commands: %s - %s", response.status_code, response.text)
         
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error polling commands: {str(e)}")
+            logger.error("Error polling commands: %s", str(e))
     
     def _send_command_result(self, command_id: str, result: Dict[str, Any]) -> bool:
         """
@@ -274,14 +274,14 @@ class CommandRelayClient:
             )
             
             if response.status_code == 200:
-                logger.info(f"Successfully sent result for command {command_id}")
+                logger.info("Successfully sent result for command %s", command_id)
                 return True
             else:
-                logger.error(f"Failed to send result: {response.status_code} - {response.text}")
+                logger.error("Failed to send result: %s - %s", response.status_code, response.text)
                 return False
         
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending result: {str(e)}")
+            logger.error("Error sending result: %s", str(e))
             return False
     
     def _send_heartbeat(self) -> bool:
@@ -315,16 +315,16 @@ class CommandRelayClient:
                 logger.debug("Successfully sent heartbeat")
                 return True
             else:
-                logger.warning(f"Failed to send heartbeat: {response.status_code} - {response.text}")
+                logger.warning("Failed to send heartbeat: %s - %s", response.status_code, response.text)
                 return False
         
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending heartbeat: {str(e)}")
+            logger.error("Error sending heartbeat: %s", str(e))
             return False
     
     def _run_polling_loop(self) -> None:
         """Run the polling loop."""
-        logger.info(f"Starting command polling with interval {self.poll_interval} seconds")
+        logger.info("Starting command polling with interval %s seconds", self.poll_interval)
         
         # Register with the server
         self._register_client()
@@ -333,7 +333,7 @@ class CommandRelayClient:
             try:
                 self._poll_commands()
             except Exception as e:
-                logger.error(f"Error in polling loop: {str(e)}")
+                logger.error("Error in polling loop: %s", str(e))
             
             # Sleep until next poll
             for _ in range(self.poll_interval):
@@ -378,14 +378,14 @@ class CommandRelayClient:
             )
             
             if response.status_code == 200:
-                logger.info(f"Successfully registered client with ID: {self.client_id}")
+                logger.info("Successfully registered client with ID: %s", self.client_id)
                 return True
             else:
-                logger.error(f"Failed to register client: {response.status_code} - {response.text}")
+                logger.error("Failed to register client: %s - %s", response.status_code, response.text)
                 return False
         
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error registering client: {str(e)}")
+            logger.error("Error registering client: %s", str(e))
             return False
     
     def start(self) -> None:
@@ -488,7 +488,7 @@ if __name__ == "__main__":
     # Setup logging
     numeric_level = getattr(logging, args.log_level.upper(), None)
     if not isinstance(numeric_level, int):
-        raise ValueError(f"Invalid log level: {args.log_level}")
+        raise ValueError("Invalid log level: %s" % args.log_level)
     
     logging.basicConfig(
         level=numeric_level,
