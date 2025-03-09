@@ -4,19 +4,134 @@ CLI application for collecting and sending metrics from various collectors.
 This is a more customizable version of the custom_collectors_example.py script.
 """
 import argparse
+import importlib
+import inspect
 import logging
+import pkgutil
 import sys
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type, Tuple
 
-from collectors.battery_collector.battery_collector import BatteryCollector
-from collectors.bus_collector.bus_collector import BusCollector
+from sdk.collector import Collector
 from sdk import metrics_sdk
 from sdk import config
 from command_relay import start_command_relay, stop_command_relay
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+
+class CollectorRegistry:
+    """
+    Registry for dynamically discovering and instantiating collectors.
+    This eliminates the need for main.py to have specific knowledge of collectors.
+    """
+    
+    def __init__(self):
+        self.collectors = {}
+    
+    def discover_collectors(self):
+        """
+        Discover all collector classes that inherit from the base Collector class.
+        """
+        import collectors
+        logger.debug("Starting collector discovery...")
+        
+        # First, try to directly import known collector modules
+        known_modules = [
+            'collectors.battery_collector.battery_collector',
+            'collectors.bus_collector.bus_collector'
+        ]
+        
+        for module_name in known_modules:
+            try:
+                logger.debug("Attempting to import known module: %s", module_name)
+                module = importlib.import_module(module_name)
+                self._register_collectors_from_module(module)
+            except ImportError as e:
+                logger.warning("Could not import known collector module %s: %s", module_name, e)
+        
+        # Then fall back to automatic discovery
+        collector_modules = self._find_collector_modules(collectors)
+        logger.debug("Found collector modules: %s", collector_modules)
+        
+        for module_name in collector_modules:
+            try:
+                logger.debug("Attempting to import module: %s", module_name)
+                module = importlib.import_module(module_name)
+                self._register_collectors_from_module(module)
+            except ImportError as e:
+                logger.warning("Could not import collector module %s: %s", module_name, e)
+    
+    def _find_collector_modules(self, package) -> List[str]:
+        """
+        Find all modules in the collectors package that might contain collectors.
+        """
+        modules = []
+        prefix = package.__name__ + "."
+        
+        for _, name, is_pkg in pkgutil.iter_modules(package.__path__, prefix):
+            if is_pkg:
+                try:
+                    subpackage = importlib.import_module(name)
+                    modules.extend(self._find_collector_modules(subpackage))
+                except ImportError as e:
+                    logger.warning("Could not import collector package %s: %s", name, e)
+            else:
+                modules.append(name)
+        
+        return modules
+    
+    def _register_collectors_from_module(self, module):
+        """
+        Register all collector classes from a module.
+        """
+        found_collectors = False
+        logger.debug("Examining module %s for collectors", module.__name__)
+        
+        for name, obj in inspect.getmembers(module):
+            try:
+                if (inspect.isclass(obj) and 
+                    issubclass(obj, Collector) and 
+                    obj != Collector and 
+                    not inspect.isabstract(obj)):
+                    
+                    # Extract collector type from class name or attributes
+                    collector_type = obj.__name__.replace('Collector', '').lower()
+                    self.collectors[collector_type] = obj
+                    logger.info("Registered collector: %s from class %s", collector_type, obj.__name__)
+                    found_collectors = True
+            except TypeError:
+                # This can happen when inspecting objects that can't be checked with issubclass
+                pass
+                
+        if not found_collectors:
+            logger.debug("No collectors found in module %s", module.__name__)
+    
+    def get_collector_class(self, collector_type: str) -> Optional[Type[Collector]]:
+        """
+        Get the collector class for a given collector type.
+        
+        Args:
+            collector_type (str): The type of collector to get
+            
+        Returns:
+            Type[Collector]: The collector class or None if not found
+        """
+        return self.collectors.get(collector_type.lower())
+    
+    def get_available_collectors(self) -> List[str]:
+        """
+        Get a list of available collector types.
+        
+        Returns:
+            list: List of available collector types
+        """
+        return list(self.collectors.keys())
+
+
+# Initialize collector registry
+collector_registry = CollectorRegistry()
 
 
 def setup_logging(log_level: str) -> None:
@@ -57,113 +172,101 @@ def configure_sdk(args: argparse.Namespace) -> None:
     )
 
 
-def collect_battery_metrics(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
+def instantiate_collector(collector_type: str, collector_args: Dict[str, Any], dry_run: bool) -> Optional[Collector]:
     """
-    Collect battery metrics.
+    Instantiate a collector of the specified type with the provided arguments.
     
     Args:
-        args (argparse.Namespace): Command line arguments
+        collector_type (str): Type of collector to instantiate
+        collector_args (dict): Arguments to pass to the collector constructor
+        dry_run (bool): Whether to run in dry-run mode
         
     Returns:
-        dict: Battery metrics or None if collection failed
+        Collector: An instance of the requested collector or None if not found
     """
-    if not args.collect_battery:
+    # Handle common variations in collector type names
+    collector_type = collector_type.lower()
+    if collector_type.endswith('collector'):
+        collector_type = collector_type[:-9]  # Remove 'collector' suffix
+    
+    # Get the collector class
+    collector_class = collector_registry.get_collector_class(collector_type)
+    
+    if not collector_class:
+        available = collector_registry.get_available_collectors()
+        logger.error("Collector type not found: %s. Available collectors: %s", 
+                    collector_type, available if available else "None discovered")
         return None
-        
-    battery_collector = BatteryCollector()
-    battery_metric = battery_collector.safe_collect()
     
-    if 'error' in battery_metric:
-        logger.error("Battery collection error: %s", battery_metric['error'])
+    try:
+        # Add dry_run to constructor arguments if the collector accepts it
+        constructor_params = inspect.signature(collector_class.__init__).parameters
+        if 'dry_run' in constructor_params:
+            collector_args['dry_run'] = dry_run
+            
+        # Instantiate the collector
+        return collector_class(**collector_args)
+        
+    except Exception as e:
+        logger.error("Error instantiating collector %s: %s", collector_type, e)
         return None
-        
-    logger.info("Battery: %s%%", battery_metric['metric'])
-    
-    metrics_data = {
-        'name': 'battery_percentage',
-        'value': battery_metric['metric'],
-        'unit': '%',
-        'description': 'Battery charge percentage',
-        'metadata': {
-            'collector_type': 'battery',
-            'collection_time': time.time()
-        }
-    }
-    
-    if args.dry_run:
-        logger.info("DRY RUN: Would send battery metrics: %s", metrics_data)
-    else:
-        metrics_sdk.send_metrics(metrics_data)
-        
-    return battery_metric
 
 
-def collect_bus_metrics(args: argparse.Namespace) -> List[Dict[str, Any]]:
+def collect_with_collector(collector: Collector, dry_run: bool = False) -> Optional[Dict[str, Any]]:
     """
-    Collect bus metrics for all specified routes.
+    Collect metrics using the provided collector.
     
     Args:
-        args (argparse.Namespace): Command line arguments
+        collector (Collector): The collector to use
+        dry_run (bool): Whether to run in dry-run mode
         
     Returns:
-        list: List of collected bus metrics
+        dict: Collected metrics or None if collection failed
     """
-    if not args.bus_routes:
-        return []
+    try:
+        # Check if the collector's collect_and_send method accepts dry_run parameter
+        collect_and_send_params = inspect.signature(collector.collect_and_send).parameters
         
-    results = []
+        if 'dry_run' in collect_and_send_params:
+            # If it accepts dry_run, pass it
+            return collector.collect_and_send(dry_run=dry_run)
+        else:
+            # If it doesn't accept dry_run, call without the parameter
+            logger.debug("%s.collect_and_send() doesn't accept dry_run parameter", collector.__class__.__name__)
+            return collector.collect_and_send()
+            
+    except Exception as e:
+        logger.error("Error collecting metrics with %s: %s", collector.name, e)
+        return None
+
+
+def parse_collector_spec(spec: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Parse a collector specification string into a collector type and parameters.
     
-    for route in args.bus_routes:
-        try:
-            from_stop, to_stop = route.split(':')
-            
-            bus_collector = BusCollector(
-                from_stage_name=from_stop,
-                to_stage_name=to_stop
-            )
-            
-            bus_metrics = bus_collector.safe_collect()
-            
-            if 'error' in bus_metrics:
-                logger.error("Bus collection error for %s to %s: %s", from_stop, to_stop, bus_metrics['error'])
-                continue
-                
-            logger.info("Bus from %s to %s: %s minutes", from_stop, to_stop, bus_metrics['minutes_until_arrival'])
-            
-            # Create a unique name for this route
-            route_name = f"{from_stop.replace(' ', '_')}_to_{to_stop.replace(' ', '_')}_bus_time"
-            
-            metrics_data = {
-                'name': route_name,
-                'value': bus_metrics['minutes_until_arrival'],
-                'unit': 'minutes',
-                'description': f'Minutes until next bus from {from_stop} to {to_stop}',
-                'metadata': {
-                    'from_stop': from_stop,
-                    'to_stop': to_stop,
-                    'status': bus_metrics.get('status', 'Unknown'),
-                    'journey_id': bus_metrics.get('journey_id', 'Unknown'),
-                    'collector_type': 'bus',
-                    'collection_time': time.time()
-                }
-            }
-            
-            if args.dry_run:
-                logger.info("DRY RUN: Would send bus metrics: %s", metrics_data)
-            else:
-                metrics_sdk.send_metrics(metrics_data)
-                
-            results.append(bus_metrics)
-            
-        except ValueError as e:
-            logger.error("Invalid bus route format: %s. Use 'from_stop:to_stop'. Error: %s", route, e)
-            
-    return results
+    Args:
+        spec (str): Collector specification in format "type:param1=value1,param2=value2"
+        
+    Returns:
+        tuple: (collector_type, parameters_dict)
+    """
+    parts = spec.split(':', 1)
+    collector_type = parts[0].strip().lower()
+    
+    params = {}
+    if len(parts) > 1 and parts[1].strip():
+        param_parts = parts[1].strip().split(',')
+        for param in param_parts:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                params[key.strip()] = value.strip()
+    
+    return collector_type, params
 
 
 def collect_all_metrics(args: argparse.Namespace) -> Dict[str, Any]:
     """
-    Collect metrics from all configured collectors.
+    Collect metrics from all configured collectors based on command line arguments.
     
     Args:
         args (argparse.Namespace): Command line arguments
@@ -171,26 +274,66 @@ def collect_all_metrics(args: argparse.Namespace) -> Dict[str, Any]:
     Returns:
         dict: Dictionary with all collected metrics
     """
-    results = {
-        'battery': None,
-        'bus': []
-    }
+    results = {}
     
     try:
-        # Collect battery metrics
-        results['battery'] = collect_battery_metrics(args)
-        
-        # Collect bus metrics
-        results['bus'] = collect_bus_metrics(args)
-        
+        # Process collectors
+        for collector_spec in args.collectors:
+            try:
+                collector_type, params = parse_collector_spec(collector_spec)
+                
+                # Create the collector and collect metrics
+                collector = instantiate_collector(collector_type, params, args.dry_run)
+                if collector:
+                    collector_results = collect_with_collector(collector, args.dry_run)
+                    
+                    # Store results (either as a single item or in a list depending on collector type)
+                    if collector_type not in results:
+                        if collector_type == 'bus':  # Bus collector results should be in a list
+                            results[collector_type] = []
+                        else:
+                            results[collector_type] = None
+                        
+                    if collector_type == 'bus' and isinstance(results[collector_type], list):
+                        if collector_results and 'error' not in collector_results:
+                            results[collector_type].append(collector_results)
+                    else:
+                        results[collector_type] = collector_results
+                        
+            except ValueError as e:
+                logger.error("Invalid collector specification: %s. Error: %s", collector_spec, e)
+    
     except Exception as e:
         logger.error("Error collecting metrics: %s", e)
-        
+    
     return results
 
 
 def main():
     """Main function to parse arguments and run the collectors."""
+    # Parse arguments first to get log level
+    parser = argparse.ArgumentParser(
+        description='Collect and send metrics from various collectors.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    # Add log level argument early
+    parser.add_argument('--log-level', type=str, default='INFO',
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        help='Log level')
+    
+    # Parse just the log level first
+    args, _ = parser.parse_known_args()
+    
+    # Setup logging with the specified log level
+    setup_logging(args.log_level)
+    
+    # Now discover collectors
+    logger.info("Discovering collectors...")
+    collector_registry.discover_collectors()
+    available_collectors = collector_registry.get_available_collectors()
+    logger.info("Available collectors: %s", available_collectors)
+    
     parser = argparse.ArgumentParser(
         description='Collect and send metrics from various collectors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -207,11 +350,9 @@ def main():
     parser.add_argument('--dry-run', action='store_true',
                         help='Do not send metrics to server, just log them')
     
-    # Collector options
-    parser.add_argument('--collect-battery', action='store_true',
-                        help='Collect battery metrics')
-    parser.add_argument('--bus-routes', type=str, nargs='*',
-                        help='Bus routes to monitor in format "from_stop:to_stop"')
+    # Generic collector option for any collector type
+    parser.add_argument('--collectors', type=str, nargs='*', required=True,
+                        help='List of collectors to run in format "type:param1=value1,param2=value2"')
     
     # SDK configuration
     parser.add_argument('--server-url', type=str, default=config.SERVER_URL,
@@ -265,8 +406,8 @@ def main():
         )
     
     # Validate arguments
-    if not args.collect_battery and not args.bus_routes:
-        logger.error("No collectors specified. Use --collect-battery or --bus-routes.")
+    if not args.collectors:
+        logger.error("No collectors specified. Use --collectors to specify the collectors to run.")
         sys.exit(1)
     
     # Run collection rounds

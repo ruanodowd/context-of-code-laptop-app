@@ -1,8 +1,9 @@
 import json
 import logging
 import requests
+import time
 from requests.exceptions import RequestException
-from typing import Dict
+from typing import Dict, Any
 from sdk.collector import Collector
 
 logger = logging.getLogger(__name__)
@@ -10,17 +11,19 @@ logger = logging.getLogger(__name__)
 class BusCollector(Collector):
     """Collector for bus arrival metrics."""
     
-    def __init__(self, from_stage_name: str, to_stage_name: str):
+    def __init__(self, from_stage_name: str, to_stage_name: str, dry_run: bool = False):
         """
         Initialize the bus collector for a specific route.
         
         Args:
             from_stage_name (str): Full name of the origin bus stop
             to_stage_name (str): Full name of the destination bus stop
+            dry_run (bool): If True, don't actually send metrics to server
         """
         self.base_url = "https://ticketbooking.dublincoach.ie/MobileAPI/MobileBooking/GetJourneyList"
         self.from_stage_name = from_stage_name
         self.to_stage_name = to_stage_name
+        self.dry_run = dry_run
         
     def _string_time_to_minutes(self, time: str) -> int:
         """Convert string time format to minutes
@@ -124,19 +127,73 @@ class BusCollector(Collector):
             logger.error("Error collecting bus metrics: %s", str(e))
             raise RuntimeError(f"Error collecting bus metrics: {str(e)}")
 
+    def format_metrics(self, raw_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format the raw bus metrics for the metrics SDK.
+        
+        Args:
+            raw_metrics (dict): Raw bus metrics from collect()
+            
+        Returns:
+            dict: Formatted metrics ready for SDK
+        """
+        if 'error' in raw_metrics:
+            return {'error': raw_metrics['error']}
+        
+        # Create a unique name for this route
+        route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
+        
+        metrics_data = {
+            'name': route_name,
+            'value': raw_metrics['minutes_until_arrival'],
+            'unit': 'minutes',
+            'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+            'metadata': {
+                'from_stop': self.from_stage_name,
+                'to_stop': self.to_stage_name,
+                'status': raw_metrics.get('status', 'Unknown'),
+                'journey_id': raw_metrics.get('journey_id', 'Unknown'),
+                'collector_type': 'bus',
+                'collection_time': time.time()
+            }
+        }
+        
+        return metrics_data
+    
+    def collect_and_send(self) -> Dict[str, Any]:
+        """
+        Collect, format and send bus metrics for the configured route.
+        
+        Returns:
+            dict: Bus metrics or dict with error information
+        """
+        # Defer to the base class implementation with our dry_run setting
+        result = super().collect_and_send(dry_run=self.dry_run)
+        
+        # Add our route-specific logging if the collection was successful
+        if 'error' not in result:
+            logger.info("Bus from %s to %s: %s minutes", 
+                      self.from_stage_name, self.to_stage_name, result['minutes_until_arrival'])
+        
+        return result
+
+
 if __name__ == '__main__':
     # Setup logging
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     
-    # Test the collector
-    collector = BusCollector()
-    try:
-        metrics = collector.safe_collect()
-        if 'error' in metrics:
-            print("Error: %s" % metrics['error'])
-        else:
-            print("Bus Metrics:")
-            print("To UL: %s minutes" % metrics['to_ul']['minutes_until_arrival'])
-            print("From UL: %s minutes" % metrics['from_ul']['minutes_until_arrival'])
-    except Exception as e:
-        print("Error: %s" % str(e))
+    # Test the collector with a sample route
+    from_stop = "Limerick"
+    to_stop = "Dublin"
+    
+    collector = BusCollector(from_stop, to_stop, dry_run=True)
+    result = collector.collect_and_send()
+    
+    if 'error' not in result:
+        print("Bus from %s to %s arriving in %s minutes" % 
+             (from_stop, to_stop, result['minutes_until_arrival']))
+    else:
+        print("Error: %s" % result['error'])

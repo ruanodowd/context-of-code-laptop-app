@@ -11,7 +11,9 @@ class Collector(ABC):
     """
     Abstract base class for all metric collectors.
     
-    All collectors should inherit from this class and implement the collect() method.
+    All collectors should inherit from this class and implement the required methods:
+    - collect(): Implement the specific data collection logic
+    - format_metrics(): Format the raw metrics for the SDK
     """
     
     @abstractmethod
@@ -46,3 +48,46 @@ class Collector(ABC):
         except Exception as e:
             logger.error("Error collecting metrics from %s: %s", self.name, str(e))
             return {'error': str(e)}
+    
+    @abstractmethod
+    def format_metrics(self, raw_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format the raw metrics for the metrics SDK.
+        
+        Args:
+            raw_metrics (dict): Raw metrics from collect()
+            
+        Returns:
+            dict: Formatted metrics ready for SDK
+        """
+        pass
+    
+    def collect_and_send(self, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Collect, format and send metrics.
+        
+        Args:
+            dry_run (bool): If True, don't actually send metrics to server
+            
+        Returns:
+            dict: Collected metrics or error information
+        """
+        metrics = self.safe_collect()
+        
+        if 'error' in metrics:
+            logger.error("%s collection error: %s", self.name, metrics['error'])
+            return metrics
+        
+        formatted_metrics = self.format_metrics(metrics)
+        
+        if dry_run:
+            logger.info("DRY RUN: Would send %s metrics: %s", self.name, formatted_metrics)
+        else:
+            # Import here to avoid circular imports
+            try:
+                from sdk import metrics_sdk
+                metrics_sdk.send_metrics(formatted_metrics)
+            except (ImportError, AttributeError) as e:
+                logger.warning("Cannot send metrics: %s", str(e))
+        
+        return metrics

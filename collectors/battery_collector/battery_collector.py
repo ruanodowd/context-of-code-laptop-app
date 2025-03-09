@@ -2,6 +2,8 @@ import os
 import subprocess
 import json
 import logging
+import time
+from typing import Dict, Any
 from sdk.collector import Collector
 
 logger = logging.getLogger(__name__)
@@ -9,8 +11,9 @@ logger = logging.getLogger(__name__)
 class BatteryCollector(Collector):
     """Collector for battery metrics."""
     
-    def __init__(self):
+    def __init__(self, dry_run: bool = False):
         self.battery_path = '/sys/class/power_supply/BAT0'
+        self.dry_run = dry_run
     
     def _is_wsl(self):
         """Check if running under Windows Subsystem for Linux."""
@@ -75,10 +78,53 @@ class BatteryCollector(Collector):
         except FileNotFoundError:
             raise RuntimeError('Battery information not available')
 
+    def format_metrics(self, raw_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format the raw battery metrics for the metrics SDK.
+        
+        Args:
+            raw_metrics (dict): Raw battery metrics from collect()
+            
+        Returns:
+            dict: Formatted metrics ready for SDK
+        """
+        if 'error' in raw_metrics:
+            return {'error': raw_metrics['error']}
+            
+        metrics_data = {
+            'name': 'battery_percentage',
+            'value': raw_metrics['metric'],
+            'unit': '%',
+            'description': 'Battery charge percentage',
+            'metadata': {
+                'collector_type': 'battery',
+                'is_charging': raw_metrics.get('is_charging', False),
+                'collection_time': time.time()
+            }
+        }
+        
+        return metrics_data
+    
+    def collect_and_send(self) -> Dict[str, Any]:
+        """
+        Collect, format and send battery metrics.
+        
+        Returns:
+            dict: Battery metrics or dict with error information
+        """
+        # Call the base class implementation with our dry_run setting
+        return super().collect_and_send(dry_run=self.dry_run)
+
+
 if __name__ == '__main__':
-    collector = BatteryCollector()
-    battery_info = collector.safe_collect()
-    if 'error' in battery_info:
-        print(battery_info['error'])
+    # Setup logging
+    logging.basicConfig(level=logging.INFO,
+                      format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    collector = BatteryCollector(dry_run=True)
+    result = collector.collect_and_send()
+    
+    if 'error' not in result:
+        print("Successfully collected battery metrics: %s%%" % result['metric'])
     else:
-        print("Battery percentage: %s%%" % battery_info['metric'])
+        print("Failed to collect battery metrics: %s" % result['error'])
