@@ -12,7 +12,7 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from uuid import UUID
 import pytz
 import requests
@@ -68,19 +68,30 @@ class UnitManager:
         try:
             return self.get_unit_by_symbol(symbol)
         except requests.RequestException:
-            # If not found, create new unit
-            response = self.client._make_request(
-                'post',
-                '',  # Base units endpoint
-                is_units_endpoint=True,
-                json={
-                    'name': name,
-                    'symbol': symbol,
-                    'description': description
-                }
-            )
-            
-            return Unit(**response)
+            # If not found, create new unit with UnitCreate schema
+            try:
+                response = self.client._make_request(
+                    'post',
+                    '',  # Base units endpoint
+                    is_units_endpoint=True,
+                    json={
+                        'name': name,
+                        'symbol': symbol,
+                        'description': description
+                    }
+                )
+                
+                return Unit(**response)
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error creating unit with symbol '{symbol}': {str(e)}")
+                # If we can't register, create a temporary unit object
+                return Unit(
+                    id=uuid.uuid4(),
+                    name=name,
+                    symbol=symbol,
+                    description=description,
+                    created_at=datetime.now(pytz.UTC)
+                )
     
     # Alias for backward compatibility
     create_unit = register_unit
@@ -112,8 +123,19 @@ class UnitManager:
         Raises:
             requests.RequestException: If server request fails
         """
-        response = self.client._make_request('get', f'symbol/{symbol}', is_units_endpoint=True)
-        return Unit(**response)
+        # The API doesn't have a direct endpoint to get units by symbol
+        # Instead, we'll get all units and filter by symbol
+        try:
+            units = self.list_units()
+            for unit in units:
+                if unit.symbol == symbol:
+                    return unit
+            
+            # If we didn't find a matching unit, raise an exception
+            raise requests.RequestException(f"Unit with symbol '{symbol}' not found")
+        except requests.RequestException as e:
+            logger.error(f"Error finding unit with symbol '{symbol}': {str(e)}")
+            raise
     
     def list_units(self) -> List[Unit]:
         """List all available units.
@@ -417,6 +439,7 @@ class MetricsClient:
             wait_fixed=self.retry_delay * 1000  # milliseconds
         )
         def _send_request():
+            # Use the metrics endpoint as per the API schema
             response = requests.post(
                 f"{self.server_url.rstrip('/')}/api/metrics/",
                 json=metrics_data,
@@ -424,10 +447,12 @@ class MetricsClient:
                 timeout=self.request_timeout
             )
             response.raise_for_status()
-            return True
+            return response.json()
         
         try:
-            return _send_request()
+            result = _send_request()
+            logger.debug(f"Successfully sent metric: {result}")
+            return True
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to send metrics after {self.max_retries} retries: {str(e)}")
             return False
@@ -565,30 +590,49 @@ class MetricsClient:
             unit_id = None
             if unit_symbol := metrics_data.get('unit'):
                 try:
+                    # Use a more descriptive unit name
+                    unit_name = unit_symbol
+                    if unit_symbol == '%':
+                        unit_name = 'Percentage'
+                    elif unit_symbol == 'minutes':
+                        unit_name = 'Minutes'
+                    
                     unit = self.unit_manager.register_unit(
-                        name=f"Unit for {unit_symbol}",
+                        name=unit_name,
                         symbol=unit_symbol,
-                        description=f"Unit for {unit_symbol} measurements"
+                        description=f"Unit for {unit_name} measurements"
                     )
                     unit_id = unit.id
                 except Exception as e:
-                    logger.error(f"Failed to register unit for symbol '{unit_symbol}': {str(e)}")
+                    logger.warning(f"Failed to register unit for symbol '{unit_symbol}': {str(e)}")
+                    # Create a temporary UUID for the unit so we can continue
+                    unit_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"unit-{unit_symbol}"))
             
             # Ensure metric type and source exist
-            metric_type_id = self._ensure_metric_type(
-                metric_name, 
-                description=metrics_data.get('description'),
-                unit_id=unit_id
-            )
+            try:
+                metric_type_id = self._ensure_metric_type(
+                    metric_name, 
+                    description=metrics_data.get('description'),
+                    unit_id=unit_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to ensure metric type: {str(e)}")
+                # Create a temporary UUID for the metric type
+                metric_type_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, metric_name))
             
-            source_id = self._ensure_source()
+            try:
+                source_id = self._ensure_source()
+            except Exception as e:
+                logger.warning(f"Failed to ensure source: {str(e)}")
+                # Create a temporary UUID for the source
+                source_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, self.source_name))
             
             # Format for web app according to new data model
             # The API expects a MetricCreate object with specific fields
             formatted_metric = {
                 'metric_type_id': metric_type_id,
                 'source_id': source_id,
-                'value': metrics_data.get('value'),
+                'value': float(metrics_data.get('value', 0)),
                 'recorded_at': metrics_data.get('timestamp') or datetime.now(pytz.UTC).isoformat()
             }
             
@@ -611,6 +655,18 @@ class MetricsClient:
                 
         except Exception as e:
             logger.error(f"Error sending metric {metric_name}: {str(e)}")
+            # Even if we failed to format properly, try to buffer the metric with basic info
+            try:
+                self.buffer.add({
+                    'metric_type_id': str(uuid.uuid5(uuid.NAMESPACE_DNS, metric_name)),
+                    'source_id': str(uuid.uuid5(uuid.NAMESPACE_DNS, self.source_name)),
+                    'value': float(metrics_data.get('value', 0)),
+                    'recorded_at': datetime.now(pytz.UTC).isoformat(),
+                    'metadata': [{'key': k, 'value': str(v)} for k, v in metrics_data.get('metadata', {}).items()]
+                })
+                logger.warning(f"Added failed metric {metric_name} to buffer")
+            except Exception as buffer_err:
+                logger.error(f"Failed to buffer metric: {str(buffer_err)}")
             return False
     
     def create_metrics_batch(self, metrics: Dict[str, Any]) -> Dict[str, Any]:

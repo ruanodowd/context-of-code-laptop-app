@@ -5,7 +5,7 @@ import os
 import socket
 
 # Server configuration
-SERVER_URL = os.getenv('METRICS_SERVER_URL', 'http://localhost:8000/api/metrics')
+SERVER_URL = os.getenv('METRICS_SERVER_URL', 'http://localhost:8000/')
 API_KEY = os.getenv('METRICS_API_KEY', 'metrics-api-key-2025')
 
 # Source configuration (replaces CLIENT_ID)
