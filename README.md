@@ -1,12 +1,151 @@
-# Metrics Collection SDK
+# Laptop Metrics Collection Application
 
-This SDK provides a framework for collecting and sending metrics to a central server. The SDK has been updated to work with the new data model that includes `MetricType`, `Source`, `Metric`, and `MetricMetadata` entities.
+A comprehensive solution for collecting, monitoring, and sending various system metrics from laptops to a central server. The application features a flexible SDK, customizable collectors, and a powerful command-line interface.
 
-## Data Model
+## Table of Contents
 
-The server's data model has been updated to the following structure:
+- [Overview](#overview)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Using the CLI](#using-the-cli)
+  - [Basic Usage](#basic-usage)
+  - [Configuration Options](#configuration-options)
+  - [Using JSON Configuration Files](#using-json-configuration-files)
+  - [Command Relay](#command-relay)
+- [Metrics SDK](#metrics-sdk)
+  - [Data Model](#data-model)
+  - [Key Components](#key-components)
+  - [Basic SDK Usage](#basic-sdk-usage)
+  - [Custom Client](#custom-client)
+  - [Environment Variables](#environment-variables)
+- [Collectors](#collectors)
+  - [Available Collectors](#available-collectors)
+  - [Creating Custom Collectors](#creating-custom-collectors)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
 
-### MetricType
+## Overview
+
+This application provides a framework for collecting system metrics from laptops and sending them to a centralized metrics server. It's designed to be both simple to use for basic use cases and highly customizable for more advanced scenarios.
+
+## Features
+
+- **Modular Collector Architecture**: Easily add or customize what metrics you want to collect
+- **Flexible SDK**: Robust SDK for programmatic use with buffering, retries, and error handling
+- **Command-line Interface**: Comprehensive CLI for configuration and operation
+- **JSON Configuration Support**: Load configurations from JSON files
+- **Remote Command Execution**: Receive and execute commands from a central server
+- **Automatic Metric Type Management**: Register and manage metric types automatically
+- **Buffering and Retries**: Store metrics locally when server is unavailable
+- **Metadata Support**: Add detailed metadata to your metrics
+- **Dry Run Mode**: Test configurations without sending metrics
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/your-organization/laptop-metrics-app.git
+cd laptop-metrics-app
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## Quick Start
+
+The simplest way to get started is to use the command-line interface:
+
+```bash
+# Collect battery metrics once
+python main.py --collectors battery --count 1
+
+# Continuously collect battery metrics every 60 seconds
+python main.py --collectors battery --interval 60
+
+# Collect both battery and bus arrival metrics
+python main.py --collectors battery bus:from_stage_name=Station1,to_stage_name=Station2
+```
+
+## Using the CLI
+
+### Basic Usage
+
+The application provides a comprehensive command-line interface:
+
+```bash
+python main.py --collectors [COLLECTORS...] [OPTIONS]
+```
+
+### Configuration Options
+
+#### Collection Options
+- `--collectors [COLLECTORS...]`: List of collectors to run in format "type:param1=value1,param2=value2"
+- `--interval INTERVAL`: Interval between collections in seconds (default: 60)
+- `--count COUNT`: Number of collection rounds (0 for infinite) (default: 0)
+- `--dry-run`: Do not send metrics to server, just log them
+
+#### SDK Configuration
+- `--server-url SERVER_URL`: URL of the metrics server
+- `--api-key API_KEY`: API key for authentication
+- `--source-name SOURCE_NAME`: Source name for metrics
+- `--source-description SOURCE_DESCRIPTION`: Description of the source
+- `--source-ip SOURCE_IP`: IP address of the source
+- `--buffer-file BUFFER_FILE`: Path to the buffer file
+- `--max-retries MAX_RETRIES`: Maximum number of retries
+- `--retry-delay RETRY_DELAY`: Delay between retries in seconds
+- `--request-timeout REQUEST_TIMEOUT`: Request timeout in seconds
+
+#### Command Relay Options
+- `--enable-command-relay`: Enable command relay to receive commands from server
+- `--command-server-url COMMAND_SERVER_URL`: Base URL of the command server API
+- `--poll-interval POLL_INTERVAL`: Interval between polling for commands in seconds
+
+#### Other Options
+- `--config-file CONFIG_FILE`: Path to JSON configuration file
+- `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`: Set logging level
+
+### Using JSON Configuration Files
+
+You can store your configuration in a JSON file:
+
+```json
+{
+    "collectors": ["battery", "bus:from_stage_name=Station1,to_stage_name=Station2"],
+    "interval": 120,
+    "count": 5,
+    "log-level": "INFO",
+    "server-url": "http://localhost:8000",
+    "source-name": "Laptop-Config-File",
+    "dry-run": false
+}
+```
+
+And use it with:
+
+```bash
+python main.py --config-file your_config.json
+```
+
+Command-line arguments take precedence over values in the JSON file.
+
+### Command Relay
+
+The Command Relay feature allows the application to receive and execute commands from a central server:
+
+```bash
+python main.py --collectors battery --enable-command-relay --command-server-url http://command-server.example.com
+```
+
+## Metrics SDK
+
+The SDK provides a framework for collecting and sending metrics to a central server.
+
+### Data Model
+
+The server's data model has the following structure:
+
+#### MetricType
 - **id**: UUID primary key
 - **name**: Unique identifier for the metric type (e.g., 'cpu_usage', 'memory_usage')
 - **description**: Detailed description of what this metric represents
@@ -14,7 +153,7 @@ The server's data model has been updated to the following structure:
 - **created_at**: When this metric type was defined
 - **is_active**: Whether this metric type is currently active
 
-### Source
+#### Source
 - **id**: UUID primary key
 - **name**: Name of the source (e.g., 'server1', 'process2')
 - **description**: Detailed description of the source
@@ -22,23 +161,28 @@ The server's data model has been updated to the following structure:
 - **created_at**: When this source was defined
 - **is_active**: Whether this source is currently active
 
-### Metric
+#### Metric
 - **id**: UUID primary key
 - **metric_type_id**: Reference to the metric type definition
 - **source_id**: Reference to the source definition
 - **value**: The numerical value of the metric
 - **recorded_at**: When the metric was recorded
 
-### MetricMetadata
+#### MetricMetadata
 - **id**: UUID primary key
 - **metric_id**: Reference to the metric
 - **key**: Metadata key
 - **value**: Metadata value
 - **created_at**: When this metadata was created
 
-## SDK Usage
+### Key Components
 
-### Basic Usage
+- **MetricsClient**: Handles the communication with the metrics server
+- **MetricsManager**: Manages collectors and orchestrates the collection process
+- **Collector**: Base class for implementing metric collectors
+- **CommandRelayClient**: Receives and executes commands from a central server
+
+### Basic SDK Usage
 
 ```python
 from sdk import metrics_sdk
@@ -64,18 +208,6 @@ metrics_sdk.send_metrics({
 })
 ```
 
-### Configuration
-
-The SDK can be configured using environment variables:
-
-- `METRICS_SERVER_URL`: URL of the metrics server (default: http://localhost:8000/api/metrics)
-- `METRICS_API_KEY`: API key for authentication (default: metrics-api-key-2025)
-- `METRICS_SOURCE_NAME`: Name of the source (default: hostname)
-- `METRICS_SOURCE_DESCRIPTION`: Description of the source (default: "Metrics from {hostname}")
-- `METRICS_SOURCE_IP`: IP address of the source (default: None, detected by server)
-- `METRICS_BUFFER_FILE`: Path to the buffer file (default: metrics_buffer.json)
-- `LOG_LEVEL`: Logging level (default: INFO)
-
 ### Custom Client
 
 You can create a custom client with specific configuration:
@@ -99,157 +231,142 @@ custom_client.send_metrics({
 })
 ```
 
+### Environment Variables
+
+The SDK can be configured using environment variables:
+
+- `METRICS_SERVER_URL`: URL of the metrics server
+- `METRICS_API_KEY`: API key for authentication
+- `METRICS_SOURCE_NAME`: Name of the source
+- `METRICS_SOURCE_DESCRIPTION`: Description of the source
+- `METRICS_SOURCE_IP`: IP address of the source
+- `METRICS_BUFFER_FILE`: Path to the buffer file
+- `LOG_LEVEL`: Logging level
+
 ## Collectors
 
-The SDK includes a base `Collector` class that can be extended to create custom metric collectors. Each collector should implement the `collect()` method that returns a dictionary of metrics.
+Collectors are responsible for gathering specific metrics. The application comes with several built-in collectors and allows you to create custom ones.
 
-Example:
+### Available Collectors
+
+#### Battery Collector
+
+Collects battery metrics such as charge percentage, charging status, and remaining time.
+
+```bash
+python main.py --collectors battery
+```
+
+#### Bus Collector
+
+Collects bus arrival time metrics for specified routes.
+
+```bash
+python main.py --collectors "bus:from_stage_name=Station1,to_stage_name=Station2"
+```
+
+### Creating Custom Collectors
+
+To create a custom collector, inherit from the `Collector` base class and implement the required methods:
 
 ```python
 from sdk.collector import Collector
+from typing import Dict, Any
 
-class CPUCollector(Collector):
-    def collect(self):
-        # Collect CPU metrics
-        cpu_usage = get_cpu_usage()  # Your implementation
+class MyCustomCollector(Collector):
+    def __init__(self, param1="default", param2=42):
+        self.param1 = param1
+        self.param2 = param2
+    
+    def collect(self) -> Dict[str, Any]:
+        # Implement your metric collection logic here
         return {
-            'metric': cpu_usage,
-            'timestamp': None  # Will be added by SDK
+            'my_value': 42,
+            'status': 'ok'
+        }
+    
+    def format_metrics(self, raw_metrics):
+        return {
+            'name': 'my_custom_metric',
+            'value': raw_metrics['my_value'],
+            'unit': 'count',
+            'description': 'My custom metric',
+            'metadata': {
+                'param1': self.param1,
+                'param2': self.param2
+            }
         }
 ```
 
-## Metrics Manager
+Register your collector by placing it in the `collectors` directory with the appropriate structure.
 
-The `MetricsManager` class provides a way to manage multiple collectors and collect metrics from all of them at once.
+## Troubleshooting
+
+Common issues and their solutions:
+
+1. **Server Connection Issues**:
+   - Verify the server URL is correct
+   - Check network connectivity
+   - Ensure the API key is valid
+
+2. **Collector Errors**:
+   - Check collector parameters
+   - Verify the services the collector depends on are available
+   - Look for specific error messages in the logs
+
+3. **Configuration Issues**:
+   - Validate JSON syntax in configuration files
+   - Check for typos in parameter names
+   - Ensure all required parameters are provided
+
+## Examples
+
+### Collecting Multiple Metrics
+
+```bash
+python main.py --collectors battery "bus:from_stage_name=Station1,to_stage_name=Station2" --interval 300 --count 10
+```
+
+### Using Dry Run Mode
+
+```bash
+python main.py --collectors battery --dry-run
+```
+
+### Creating a Custom Collector in Code
 
 ```python
-from sdk.metrics_manager import MetricsManager
-from my_collectors import CPUCollector, MemoryCollector
+from sdk.collector import Collector
+from sdk import metrics_sdk
 
-# Create a manager
-manager = MetricsManager()
+class WeatherCollector(Collector):
+    def __init__(self, location="New York"):
+        self.location = location
+    
+    def collect(self):
+        # Simulate getting weather data
+        return {
+            'temperature': 22.5,
+            'humidity': 65,
+            'location': self.location
+        }
+    
+    def format_metrics(self, raw_metrics):
+        return {
+            'name': f'weather_temperature_{self.location.lower().replace(" ", "_")}',
+            'value': raw_metrics['temperature'],
+            'unit': 'C',
+            'description': f'Temperature in {self.location}',
+            'metadata': {
+                'humidity': raw_metrics['humidity'],
+                'location': self.location
+            }
+        }
 
-# Register collectors
-manager.register_collector(CPUCollector())
-manager.register_collector(MemoryCollector())
-
-# Collect and send metrics from all collectors
-manager.collect_and_send()
+# Use the collector
+metrics_sdk.init_client(source_name="Weather Station")
+weather_collector = WeatherCollector(location="San Francisco")
+metrics = weather_collector.collect()
+formatted_metrics = weather_collector.format_metrics(metrics)
+metrics_sdk.send_metrics(formatted_metrics)
 ```
-
-## Error Handling and Buffering
-
-The SDK includes automatic buffering of metrics when the server is unavailable. Buffered metrics will be sent when the server becomes available again.
-
-## CLI Application
-
-The repository includes a command-line interface (CLI) application (`new_main.py`) that allows you to collect and send metrics with customizable options.
-
-### Usage
-
-```bash
-./new_main.py [options]
-```
-
-### Options
-
-#### General Options
-- `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`: Set the logging level (default: INFO)
-- `--interval INTERVAL`: Interval between collections in seconds (default: 60)
-- `--count COUNT`: Number of collection rounds (0 for infinite) (default: 1)
-- `--dry-run`: Do not send metrics to server, just log them
-
-#### Collector Options
-- `--collect-battery`: Collect battery metrics
-- `--bus-routes [BUS_ROUTES ...]`: Bus routes to monitor in format "from_stop:to_stop"
-
-#### SDK Configuration
-- `--server-url SERVER_URL`: URL of the metrics server
-- `--api-key API_KEY`: API key for authentication
-- `--source-name SOURCE_NAME`: Source name for metrics
-- `--source-description SOURCE_DESCRIPTION`: Description of the source
-- `--source-ip SOURCE_IP`: IP address of the source
-- `--buffer-file BUFFER_FILE`: Path to the buffer file
-- `--max-retries MAX_RETRIES`: Maximum number of retries
-- `--retry-delay RETRY_DELAY`: Delay between retries in seconds
-- `--request-timeout REQUEST_TIMEOUT`: Request timeout in seconds
-
-### Examples
-
-#### Collect Battery Metrics Once
-```bash
-./new_main.py --collect-battery
-```
-
-#### Collect Bus Information Every 5 Minutes
-```bash
-./new_main.py --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" "T310 Beechfield:T310 UL East Gate / An Geata Thoir" --interval 300 --count 0
-```
-
-#### Collect All Metrics with Custom Source Name
-```bash
-./main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --source-name "my-laptop" --source-description "My Personal Laptop"
-```
-
-#### Dry Run to Test Configuration
-```bash
-./main.py --collect-battery --bus-routes "T310 UL East Gate / An Geata Thoir:T310 Hazel Hall Estate" --dry-run
-```
-
-## Command Relay System
-
-The application includes a command relay system that allows the client to receive and execute commands from a server, even when behind NAT, firewalls, or restrictive networks like university networks. This system uses a polling approach where the client periodically checks for new commands from the server.
-
-### Supported Commands
-
-- `shutdown_wsl`: Shuts down the Windows Subsystem for Linux
-- `ping`: Simple ping command for testing connectivity
-
-### Command Format
-
-Commands sent from the server to the client should follow this format:
-
-```json
-{
-  "id": "unique-command-id",
-  "command_type": "ping",
-  "params": {}
-}
-```
-
-Or alternatively:
-
-```json
-{
-  "command_id": "unique-command-id",
-  "command": "ping",
-  "params": {}
-}
-```
-
-The client will handle both formats.
-
-### Usage
-
-To enable the command relay system, use the following options:
-
-```bash
-./main.py --enable-command-relay --command-server-url "http://localhost:8000" --poll-interval 30 --collect-battery
-```
-
-**Note**: The command server URL should be the base URL of your server (e.g., `http://localhost:8000`). The client will automatically append the API paths.
-
-### Command Relay Options
-
-- `--enable-command-relay`: Enable the command relay system
-- `--command-server-url`: Base URL of the command server API
-- `--poll-interval`: Interval between polling for commands in seconds (default: 30)
-
-### How It Works
-
-1. The client registers with the server on startup
-2. The client periodically polls the server for new commands
-3. When a command is received, the client executes it and sends the result back to the server
-4. The client maintains a heartbeat with the server to indicate it's still active
-
-This approach works well in restricted network environments since it only requires the client to make outbound HTTP requests, which are typically allowed even in restrictive networks.
