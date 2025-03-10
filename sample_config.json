@@ -1,0 +1,9 @@
+{
+    "collectors": ["battery", "bus:from_stage_name=T310 UL East Gate / An Geata Thoir,to_stage_name=T310 Beechfield"],
+    "interval": 120,
+    "count": 5,
+    "log-level": "INFO",
+    "server-url": "http://localhost:8000",
+    "source-name": "Laptop-Config-File",
+    "dry-run": false
+}

@@ -82,17 +82,76 @@ class BusCollector(Collector):
             # Handle both list and dictionary responses
             journey_list = None
             if isinstance(parsed_data, dict):
-                journey_list = parsed_data.get('Data', {}).get('JourneyList', [])
+                # Handle dictionary response format
+                # Check if we got a no journeys available message
+                if parsed_data.get('Message') == "No journeys available.":
+                    logger.info("No journeys available for %s to %s", origin, destination)
+                    return {
+                        'status': 'no_journeys',
+                        'message': f"No journeys available from {origin} to {destination}"
+                    }
+                    
+                # Get journey list from response
+                if 'Data' in parsed_data:
+                    # If Data is a dict, get JourneyList from it
+                    if isinstance(parsed_data['Data'], dict):
+                        journey_list = parsed_data['Data'].get('JourneyList', [])
+                    # If Data is a list, use it directly
+                    elif isinstance(parsed_data['Data'], list):
+                        journey_list = parsed_data['Data']
+                    # Otherwise, empty list
+                    else:
+                        journey_list = []
+                else:
+                    journey_list = []
             elif isinstance(parsed_data, list):
+                # Handle list response format
                 journey_list = parsed_data
             
             if not journey_list:
-                raise ValueError("No journey data available")
+                logger.info("Empty journey list for %s to %s", origin, destination)
+                return {
+                    'status': 'no_journeys',
+                    'message': f"No journey data available from {origin} to {destination}"
+                }
                 
-            journey = journey_list[0]
-            if journey['JourneyID'] == 0:
-                raise ValueError("The bus has not departed yet")
+            # Safely access the first journey
+            try:
+                # Ensure journey_list contains dictionaries with required keys
+                if not isinstance(journey_list[0], dict):
+                    logger.warning("Unexpected journey data format: %s", type(journey_list[0]))
+                    return {
+                        'status': 'invalid_format',
+                        'message': f"Unexpected journey data format: {type(journey_list[0])}"
+                    }
+                    
+                # Get the first journey from the list
+                journey = journey_list[0]
+            except IndexError:
+                logger.info("Journey list is empty for %s to %s", origin, destination)
+                return {
+                    'status': 'no_journeys',
+                    'message': f"No journeys available from {origin} to {destination}"
+                }
+            
+            # Debug log the journey data structure
+            logger.debug("Journey data: %s", json.dumps(journey, indent=2))
+            if journey.get('JourneyID', 0) == 0:
+                logger.info("The bus from %s to %s has not departed yet", origin, destination)
+                return {
+                    'status': 'not_departed',
+                    'message': f"The bus from {origin} to {destination} has not departed yet"
+                }
                 
+            # Check if journey has required keys
+            required_keys = ['JourneyID', 'LeavingIn']
+            missing_keys = [key for key in required_keys if key not in journey]
+            if missing_keys:
+                logger.error("Missing required keys in journey data: %s", missing_keys)
+                logger.debug("Available keys: %s", list(journey.keys()))
+                raise ValueError(f"Missing required keys in journey data: {missing_keys}")
+                
+            # Extract time until arrival
             minutes = self._string_time_to_minutes(journey['LeavingIn'])
             logger.debug("Bus from %s to %s arriving in %s minutes", origin, destination, minutes)
             
@@ -116,16 +175,31 @@ class BusCollector(Collector):
         """Collect bus metrics for the configured route.
         
         Returns:
-            dict: Bus arrival information for the monitored route
+            dict: Bus arrival information for the monitored route or error information
         """
         try:
             return self._get_journey_info(
                 self.from_stage_name,
                 self.to_stage_name
             )
+        except ValueError as e:
+            # Handle expected errors like no journeys available
+            error_message = str(e)
+            logger.info("Bus collection issue: %s", error_message)
+            return {
+                'status': 'error',
+                'message': error_message,
+                'route': f"{self.from_stage_name} to {self.to_stage_name}"
+            }
         except Exception as e:
-            logger.error("Error collecting bus metrics: %s", str(e))
-            raise RuntimeError(f"Error collecting bus metrics: {str(e)}")
+            # Handle unexpected errors
+            error_message = str(e)
+            logger.error("Error collecting bus metrics: %s", error_message)
+            return {
+                'status': 'error',
+                'message': f"Error collecting bus metrics: {error_message}",
+                'route': f"{self.from_stage_name} to {self.to_stage_name}"
+            }
 
     def format_metrics(self, raw_metrics: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -137,8 +211,47 @@ class BusCollector(Collector):
         Returns:
             dict: Formatted metrics ready for SDK
         """
+        # Check for error or status indicators
+        if 'status' in raw_metrics:
+            if raw_metrics['status'] != 'success':
+                # Create a unique name for this route, even for error cases
+                route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
+                
+                return {
+                    'name': route_name,  # Add name field to satisfy SDK requirements
+                    'value': 0,  # Use 0 as a placeholder value for error cases
+                    'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
+                    'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+                    'error': raw_metrics.get('message', 'Unknown error'),
+                    'status': raw_metrics.get('status', 'error')
+                }
+        
+        # Handle error field for backward compatibility
         if 'error' in raw_metrics:
-            return {'error': raw_metrics['error']}
+            # Create a unique name for this route, even for error cases
+            route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
+            
+            return {
+                'name': route_name,  # Add name field to satisfy SDK requirements
+                'value': 0,  # Use 0 as a placeholder value for error cases
+                'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
+                'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+                'error': raw_metrics['error']
+            }
+            
+        # Check if we have the required fields for a metric
+        if 'minutes_until_arrival' not in raw_metrics:
+            # Create a unique name for this route, even for error cases
+            route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
+            
+            return {
+                'name': route_name,  # Add name field to satisfy SDK requirements
+                'value': 0,  # Use 0 as a placeholder value for error cases
+                'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
+                'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+                'error': 'No arrival time information available',
+                'status': 'no_data'
+            }
         
         # Create a unique name for this route
         route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"

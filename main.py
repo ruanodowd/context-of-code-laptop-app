@@ -6,7 +6,9 @@ This is a more customizable version of the custom_collectors_example.py script.
 import argparse
 import importlib
 import inspect
+import json
 import logging
+import os
 import pkgutil
 import sys
 import time
@@ -14,7 +16,7 @@ from typing import List, Dict, Any, Optional, Type, Tuple
 
 from sdk.collector import Collector
 from sdk import metrics_sdk
-from sdk import config
+from sdk import config as sdk_config  # Renamed to avoid conflict with our local config variable
 from command_relay import start_command_relay, stop_command_relay
 
 # Setup logging
@@ -309,24 +311,90 @@ def collect_all_metrics(args: argparse.Namespace) -> Dict[str, Any]:
     return results
 
 
+def load_config_from_file(config_file: str) -> Dict[str, Any]:
+    """
+    Load configuration from a JSON file.
+    
+    Args:
+        config_file (str): Path to the JSON config file
+        
+    Returns:
+        dict: Configuration dictionary with argument names as keys
+    """
+    if not os.path.exists(config_file):
+        logger.error("Config file not found: %s", config_file)
+        return {}
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            logger.debug("Loaded configuration from %s: %s", config_file, config)
+            return config
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error("Error parsing config file %s: %s", config_file, e)
+        return {}
+    except Exception as e:
+        logger.error("Unexpected error loading config file %s: %s", config_file, e)
+        return {}
+
+
+def merge_config_with_args(config: Dict[str, Any], args: argparse.Namespace) -> argparse.Namespace:
+    """
+    Merge configuration from a file with command line arguments.
+    Command line arguments take precedence over config file values.
+    
+    Args:
+        config (dict): Configuration dictionary from file
+        args (argparse.Namespace): Command line arguments
+        
+    Returns:
+        argparse.Namespace: Updated arguments namespace
+    """
+    # Convert args namespace to dictionary
+    args_dict = vars(args)
+    
+    # Only apply config values for keys that are None or not present in args
+    for key, value in config.items():
+        # Convert dashes to underscores in key names
+        arg_key = key.replace('-', '_')
+        
+        # Only set if the value is None or not provided on command line
+        if arg_key in args_dict and args_dict[arg_key] is None:
+            args_dict[arg_key] = value
+        elif arg_key not in args_dict:
+            args_dict[arg_key] = value
+    
+    # Convert back to namespace
+    return argparse.Namespace(**args_dict)
+
+
 def main():
     """Main function to parse arguments and run the collectors."""
-    # Parse arguments first to get log level
-    parser = argparse.ArgumentParser(
+    # Create first parser for early config file and log level
+    early_parser = argparse.ArgumentParser(
         description='Collect and send metrics from various collectors.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        add_help=False
     )
     
-    # Add log level argument early
-    parser.add_argument('--log-level', type=str, default='INFO',
-                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                        help='Log level')
+    # Add config file and log level arguments
+    early_parser.add_argument('--config-file', type=str,
+                              help='Path to JSON configuration file')
+    early_parser.add_argument('--log-level', type=str, default='INFO',
+                              choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                              help='Log level')
     
-    # Parse just the log level first
-    args, _ = parser.parse_known_args()
+    # Parse just these arguments first
+    early_args, remaining_args = early_parser.parse_known_args()
     
     # Setup logging with the specified log level
-    setup_logging(args.log_level)
+    setup_logging(early_args.log_level)
+    
+    # Load config from file if specified
+    config = {}
+    if early_args.config_file:
+        logger.info("Loading configuration from %s", early_args.config_file)
+        config = load_config_from_file(early_args.config_file)
     
     # Now discover collectors
     logger.info("Discovering collectors...")
@@ -338,6 +406,10 @@ def main():
         description='Collect and send metrics from various collectors.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    
+    # Add config file argument again for help display
+    parser.add_argument('--config-file', type=str,
+                        help='Path to JSON configuration file')
     
     # General options
     parser.add_argument('--log-level', type=str, default='INFO',
@@ -355,23 +427,23 @@ def main():
                         help='List of collectors to run in format "type:param1=value1,param2=value2"')
     
     # SDK configuration
-    parser.add_argument('--server-url', type=str, default=config.SERVER_URL,
+    parser.add_argument('--server-url', type=str, default=sdk_config.SERVER_URL,
                         help='URL of the metrics server')
-    parser.add_argument('--api-key', type=str, default=config.API_KEY,
+    parser.add_argument('--api-key', type=str, default=sdk_config.API_KEY,
                         help='API key for authentication')
-    parser.add_argument('--source-name', type=str, default=config.SOURCE_NAME,
+    parser.add_argument('--source-name', type=str, default=sdk_config.SOURCE_NAME,
                         help='Source name for metrics')
-    parser.add_argument('--source-description', type=str, default=config.SOURCE_DESCRIPTION,
+    parser.add_argument('--source-description', type=str, default=sdk_config.SOURCE_DESCRIPTION,
                         help='Description of the source')
-    parser.add_argument('--source-ip', type=str, default=config.SOURCE_IP,
+    parser.add_argument('--source-ip', type=str, default=sdk_config.SOURCE_IP,
                         help='IP address of the source')
-    parser.add_argument('--buffer-file', type=str, default=config.BUFFER_FILE,
+    parser.add_argument('--buffer-file', type=str, default=sdk_config.BUFFER_FILE,
                         help='Path to the buffer file')
-    parser.add_argument('--max-retries', type=int, default=config.MAX_RETRIES,
+    parser.add_argument('--max-retries', type=int, default=sdk_config.MAX_RETRIES,
                         help='Maximum number of retries')
-    parser.add_argument('--retry-delay', type=int, default=config.RETRY_DELAY,
+    parser.add_argument('--retry-delay', type=int, default=sdk_config.RETRY_DELAY,
                         help='Delay between retries in seconds')
-    parser.add_argument('--request-timeout', type=int, default=config.REQUEST_TIMEOUT,
+    parser.add_argument('--request-timeout', type=int, default=sdk_config.REQUEST_TIMEOUT,
                         help='Request timeout in seconds')
     
     # Command relay options
@@ -382,8 +454,22 @@ def main():
     parser.add_argument('--poll-interval', type=int, default=30,
                         help='Interval between polling for commands in seconds')
     
-    # Parse arguments
-    args = parser.parse_args()
+    # When using a config file, make none of the arguments required for the second parse
+    if config:
+        for action in parser._actions:
+            if action.required:
+                action.required = False
+    
+    # Parse remaining arguments
+    args = parser.parse_args(remaining_args)
+    
+    # Merge config file values with command line arguments
+    if config:
+        args = merge_config_with_args(config, args)
+        
+    # Validate that we have the minimum required arguments after merging
+    if not args.collectors:
+        parser.error("the --collectors argument is required either on command line or in config file")
     
     # Setup logging
     setup_logging(args.log_level)
