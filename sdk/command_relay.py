@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import Dict, List, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable
 
 import requests
 
@@ -48,7 +48,7 @@ class CommandExecutor:
             logger.warning("Unknown command: %s", command)
             return {
                 "status": "error",
-                "message": "Unknown command: {}".format(command)
+                "message": f"Unknown command: {command}"
             }
         
         try:
@@ -58,7 +58,7 @@ class CommandExecutor:
             logger.error("Error executing command %s: %s", command, str(e))
             return {
                 "status": "error",
-                "message": "Error executing command: {}".format(str(e))
+                "message": f"Error executing command: {str(e)}"
             }
     
     def _handle_shutdown_wsl(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -89,7 +89,7 @@ class CommandExecutor:
             else:
                 return {
                     "status": "error",
-                    "message": "WSL shutdown failed: {}".format(result.stderr)
+                    "message": f"WSL shutdown failed: {result.stderr}"
                 }
         except subprocess.TimeoutExpired:
             return {
@@ -99,7 +99,7 @@ class CommandExecutor:
         except Exception as e:
             return {
                 "status": "error",
-                "message": "Error during WSL shutdown: {}".format(str(e))
+                "message": f"Error during WSL shutdown: {str(e)}"
             }
     
     def _handle_ping(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,7 +150,7 @@ class CommandRelayClient:
         self.running = False
         self.thread = None
         
-        # File to store the last processed command ID
+        # File to store the last processed command ID - now in the sdk directory
         self.state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "command_relay_state.json")
         self._load_state()
     
@@ -199,59 +199,48 @@ class CommandRelayClient:
             if response.status_code == 200:
                 commands = response.json()
                 
-                if commands:
-                    logger.info("Received %s new command(s)", len(commands))
-                    logger.debug("Command data: %s", commands)
+                if not commands:
+                    logger.debug("No pending commands found")
+                    return
+                
+                logger.info("Found %d pending commands", len(commands))
+                for cmd in commands:
+                    command_id = cmd.get("id")
+                    command_type = cmd.get("command")
+                    command_params = cmd.get("parameters", {})
                     
-                    for cmd in commands:
-                        # Extract command details - handle different possible formats
-                        command_id = cmd.get("id") or cmd.get("command_id")
-                        command = cmd.get("command_type") or cmd.get("command")
-                        params = cmd.get("params", {})
-                        
-                        # Debug log the raw command data
-                        logger.debug("Raw command data: %s", cmd)
-                        
-                        # Skip commands with missing ID or command type
-                        if not command_id or not command:
-                            logger.warning("Skipping command with missing ID or command type: %s", cmd)
-                            continue
-                            
-                        logger.info("Processing command: %s (ID: %s)", command, command_id)
-                        
-                        # Execute the command
-                        result = self.executor.execute_command(command, params)
-                        
-                        # Send the result back to the server
-                        self._send_command_result(command_id, result)
-                        
-                        # Update the last command ID
-                        self.last_command_id = command_id
-                        self._save_state()
-                
-                # Send heartbeat even if no commands
-                self._send_heartbeat()
-                
-            elif response.status_code == 401:
-                logger.error("Authentication failed. Check your API key.")
-            elif response.status_code == 404:
-                logger.error("Command endpoint not found. Check your server URL.")
+                    # Skip if we've already processed this command
+                    if self.last_command_id and command_id == self.last_command_id:
+                        logger.debug("Skipping already processed command: %s", command_id)
+                        continue
+                    
+                    logger.info("Executing command %s: %s", command_id, command_type)
+                    result = self.executor.execute_command(command_type, command_params)
+                    
+                    # Send the result back to the server
+                    self._send_result(command_id, result)
+                    
+                    # Update the last processed command ID
+                    self.last_command_id = command_id
+                    self._save_state()
             else:
-                logger.error("Failed to poll commands: %s - %s", response.status_code, response.text)
-        
-        except requests.exceptions.RequestException as e:
+                logger.warning(
+                    "Failed to fetch commands: %d - %s",
+                    response.status_code,
+                    response.text
+                )
+        except requests.RequestException as e:
             logger.error("Error polling commands: %s", str(e))
+        except Exception as e:
+            logger.error("Unexpected error polling commands: %s", str(e))
     
-    def _send_command_result(self, command_id: str, result: Dict[str, Any]) -> bool:
+    def _send_result(self, command_id: str, result: Dict[str, Any]) -> None:
         """
-        Send command execution result to the server.
+        Send the command execution result back to the server.
         
         Args:
-            command_id (str): ID of the command
+            command_id (str): ID of the processed command
             result (dict): Result of the command execution
-            
-        Returns:
-            bool: True if successful, False otherwise
         """
         headers = {
             "x-api-key": self.api_key,
@@ -267,155 +256,79 @@ class CommandRelayClient:
         
         try:
             response = requests.post(
-                f"{self.server_url.rstrip('/')}/api/commands/results",
+                f"{self.server_url.rstrip('/')}/api/commands/result",
                 headers=headers,
                 json=data,
                 timeout=30
             )
             
             if response.status_code == 200:
-                logger.info("Successfully sent result for command %s", command_id)
-                return True
+                logger.debug("Successfully sent result for command %s", command_id)
             else:
-                logger.error("Failed to send result: %s - %s", response.status_code, response.text)
-                return False
-        
-        except requests.exceptions.RequestException as e:
-            logger.error("Error sending result: %s", str(e))
-            return False
+                logger.warning(
+                    "Failed to send result for command %s: %d - %s",
+                    command_id,
+                    response.status_code,
+                    response.text
+                )
+        except requests.RequestException as e:
+            logger.error("Error sending result for command %s: %s", command_id, str(e))
     
-    def _send_heartbeat(self) -> bool:
+    def register_command_handler(self, command: str, handler: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
         """
-        Send a heartbeat to the server.
+        Register a custom command handler.
         
-        Returns:
-            bool: True if successful, False otherwise
+        Args:
+            command (str): The command name
+            handler (callable): Function that takes parameters dict and returns result dict
         """
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        data = {
-            "client_id": self.client_id,
-            "timestamp": time.time(),
-            "status": "active",
-            "last_command_id": self.last_command_id
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.server_url.rstrip('/')}/api/clients/heartbeat",
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                logger.debug("Successfully sent heartbeat")
-                return True
-            else:
-                logger.warning("Failed to send heartbeat: %s - %s", response.status_code, response.text)
-                return False
-        
-        except requests.exceptions.RequestException as e:
-            logger.error("Error sending heartbeat: %s", str(e))
-            return False
-    
-    def _run_polling_loop(self) -> None:
-        """Run the polling loop."""
-        logger.info("Starting command polling with interval %s seconds", self.poll_interval)
-        
-        # Register with the server
-        self._register_client()
-        
-        while self.running:
-            try:
-                self._poll_commands()
-            except Exception as e:
-                logger.error("Error in polling loop: %s", str(e))
-            
-            # Sleep until next poll
-            for _ in range(self.poll_interval):
-                if not self.running:
-                    break
-                time.sleep(1)
-    
-    def _register_client(self) -> bool:
-        """
-        Register this client with the server.
-        
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        headers = {
-            "x-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        
-        # Try to get a meaningful hostname
-        hostname = os.environ.get("HOSTNAME", None)
-        if not hostname:
-            try:
-                import socket
-                hostname = socket.gethostname()
-            except:
-                hostname = "unknown"
-                
-        data = {
-            "client_id": self.client_id,
-            "client_type": "metrics_client",
-            "hostname": hostname,
-            "timestamp": time.time()
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.server_url.rstrip('/')}/api/clients/register",
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                logger.info("Successfully registered client with ID: %s", self.client_id)
-                return True
-            else:
-                logger.error("Failed to register client: %s - %s", response.status_code, response.text)
-                return False
-        
-        except requests.exceptions.RequestException as e:
-            logger.error("Error registering client: %s", str(e))
-            return False
+        self.executor.command_handlers[command] = handler
     
     def start(self) -> None:
-        """Start the command relay client in a separate thread."""
+        """Start the command polling thread."""
         if self.running:
-            logger.warning("Command relay client is already running")
+            logger.warning("Command relay already running")
             return
         
         self.running = True
-        self.thread = threading.Thread(target=self._run_polling_loop, daemon=True)
+        
+        def poll_loop():
+            logger.info("Starting command relay poll loop")
+            while self.running:
+                try:
+                    self._poll_commands()
+                except Exception as e:
+                    logger.error("Error in poll loop: %s", str(e))
+                
+                # Sleep for the poll interval
+                for _ in range(int(self.poll_interval)):
+                    if not self.running:
+                        break
+                    time.sleep(1)
+        
+        self.thread = threading.Thread(target=poll_loop, daemon=True)
         self.thread.start()
-        logger.info("Command relay client started")
+        logger.info("Command relay started with client_id: %s", self.client_id)
     
     def stop(self) -> None:
-        """Stop the command relay client."""
+        """Stop the command polling thread."""
         if not self.running:
-            logger.warning("Command relay client is not running")
+            logger.warning("Command relay not running")
             return
         
+        logger.info("Stopping command relay")
         self.running = False
         
         if self.thread:
             self.thread.join(timeout=5)
+            if self.thread.is_alive():
+                logger.warning("Command relay thread did not stop cleanly")
             self.thread = None
-        
-        logger.info("Command relay client stopped")
 
 
 # Singleton instance for easy import
 default_client = None
+
 
 def start_command_relay(
     server_url: Optional[str] = None,
@@ -448,6 +361,7 @@ def start_command_relay(
     default_client.start()
     return default_client
 
+
 def stop_command_relay() -> None:
     """Stop the command relay client."""
     global default_client
@@ -461,52 +375,44 @@ if __name__ == "__main__":
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler()
+        ]
     )
     
     # Parse command line arguments
     import argparse
-    parser = argparse.ArgumentParser(
-        description='Command relay client for receiving commands from a server.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
     
-    parser.add_argument('--server-url', type=str,
-                        help='Base URL of the command server')
-    parser.add_argument('--api-key', type=str,
-                        help='API key for authentication')
-    parser.add_argument('--client-id', type=str,
-                        help='Unique ID for this client')
-    parser.add_argument('--poll-interval', type=int, default=30,
-                        help='Interval between polling for commands in seconds')
-    parser.add_argument('--log-level', type=str, default='INFO',
-                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                        help='Log level')
+    parser = argparse.ArgumentParser(description="Command Relay Client")
+    parser.add_argument("--server-url", help="Command server URL")
+    parser.add_argument("--api-key", help="API key for authentication")
+    parser.add_argument("--client-id", help="Client ID")
+    parser.add_argument("--poll-interval", type=int, default=30, help="Poll interval in seconds")
+    parser.add_argument("--log-level", default="INFO", help="Logging level")
     
     args = parser.parse_args()
     
-    # Setup logging
-    numeric_level = getattr(logging, args.log_level.upper(), None)
-    if not isinstance(numeric_level, int):
-        raise ValueError("Invalid log level: %s" % args.log_level)
-    
-    logging.basicConfig(
-        level=numeric_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Start the command relay client
-    client = start_command_relay(
-        server_url=args.server_url,
-        api_key=args.api_key,
-        client_id=args.client_id,
-        poll_interval=args.poll_interval
-    )
+    # Set log level
+    logging.getLogger().setLevel(getattr(logging, args.log_level.upper()))
     
     try:
+        # Start the command relay
+        client = start_command_relay(
+            server_url=args.server_url,
+            api_key=args.api_key,
+            client_id=args.client_id,
+            poll_interval=args.poll_interval
+        )
+        
         # Keep the main thread alive
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info("Command relay client interrupted by user")
+        logger.info("Received keyboard interrupt, stopping...")
         stop_command_relay()
+        sys.exit(0)
+    except Exception as e:
+        logger.error("Error in main thread: %s", str(e))
+        stop_command_relay()
+        sys.exit(1)

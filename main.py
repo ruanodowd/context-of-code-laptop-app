@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Optional, Type, Tuple
 from sdk.collector import Collector
 from sdk import metrics_sdk
 from sdk import config as sdk_config  # Renamed to avoid conflict with our local config variable
-from command_relay import start_command_relay, stop_command_relay
+from sdk.command_relay import start_command_relay, stop_command_relay
 
 # Setup logging
 logger = logging.getLogger(__name__)
