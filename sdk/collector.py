@@ -35,6 +35,29 @@ class Collector(ABC):
             str: The name of the collector (class name by default)
         """
         return self.__class__.__name__
+        
+    @property
+    def metric_name(self) -> str:
+        """
+        Get the metric name to use when sending metrics.
+        If a custom metric_name was set, use that, otherwise use a default.
+        
+        Returns:
+            str: The metric name to use
+        """
+        # Return custom metric name if set, otherwise None
+        # Subclasses should implement their own default metric name
+        return getattr(self, '_metric_name', None)
+    
+    @metric_name.setter
+    def metric_name(self, value: str) -> None:
+        """
+        Set a custom metric name to use when sending metrics.
+        
+        Args:
+            value (str): The metric name to use
+        """
+        self._metric_name = value
     
     def safe_collect(self) -> Dict[str, Any]:
         """

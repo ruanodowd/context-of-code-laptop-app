@@ -1,9 +1,8 @@
 {
-    "collectors": ["battery", "bus:from_stage_name=T310 UL East Gate / An Geata Thoir,to_stage_name=T310 Beechfield"],
-    "interval": 120,
-    "count": 5,
+    "collectors": ["battery:metric_name=Laptop Battery Level", "bus:from_stage_name=T310 UL Student Centre / Ionad na Mac L,to_stage_name=T310 Hazel Hall Estate,metric_name=Time To University"],
+    "interval": 60,
+    "count": -1,
     "log-level": "INFO",
-    "server-url": "http://localhost:8000",
-    "source-name": "Laptop-Config-File",
-    "dry-run": false
+    "server-url": "http://144.126.214.129:8000",
+    "source-name": "Laptop-Config-File"
 }

@@ -81,6 +81,8 @@ python main.py --collectors [COLLECTORS...] [OPTIONS]
 
 #### Collection Options
 - `--collectors [COLLECTORS...]`: List of collectors to run in format "type:param1=value1,param2=value2"
+  - Special parameter `metric_name` can be used to specify a custom metric name different from the collector name
+  - Example: `battery:metric_name=laptop_battery_level`
 - `--interval INTERVAL`: Interval between collections in seconds (default: 60)
 - `--count COUNT`: Number of collection rounds (0 for infinite) (default: 0)
 - `--dry-run`: Do not send metrics to server, just log them
@@ -111,7 +113,10 @@ You can store your configuration in a JSON file:
 
 ```json
 {
-    "collectors": ["battery", "bus:from_stage_name=Station1,to_stage_name=Station2"],
+    "collectors": [
+        "battery:metric_name=laptop_battery_level", 
+        "bus:from_stage_name=Station1,to_stage_name=Station2,metric_name=campus_shuttle_time"
+    ],
     "interval": 120,
     "count": 5,
     "log-level": "INFO",

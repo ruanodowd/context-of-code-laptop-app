@@ -91,8 +91,11 @@ class BatteryCollector(Collector):
         if 'error' in raw_metrics:
             return {'error': raw_metrics['error']}
             
+        # Use custom metric name if set, otherwise use default
+        metric_name = self.metric_name or 'battery_percentage'
+            
         metrics_data = {
-            'name': 'battery_percentage',
+            'name': metric_name,
             'value': raw_metrics['metric'],
             'unit': '%',
             'description': 'Battery charge percentage',

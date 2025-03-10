@@ -201,13 +201,23 @@ def instantiate_collector(collector_type: str, collector_args: Dict[str, Any], d
         return None
     
     try:
+        # Extract metric_name if specified in collector_args
+        metric_name = collector_args.pop('metric_name', None) if collector_args else None
+        
         # Add dry_run to constructor arguments if the collector accepts it
         constructor_params = inspect.signature(collector_class.__init__).parameters
         if 'dry_run' in constructor_params:
             collector_args['dry_run'] = dry_run
             
         # Instantiate the collector
-        return collector_class(**collector_args)
+        collector = collector_class(**collector_args)
+        
+        # Set the metric_name attribute if provided
+        if metric_name:
+            collector.metric_name = metric_name
+            logger.info("Set custom metric name: %s for collector: %s", metric_name, collector_class.__name__)
+        
+        return collector
         
     except Exception as e:
         logger.error("Error instantiating collector %s: %s", collector_type, e)
@@ -248,6 +258,7 @@ def parse_collector_spec(spec: str) -> Tuple[str, Dict[str, Any]]:
     
     Args:
         spec (str): Collector specification in format "type:param1=value1,param2=value2"
+                    Special parameter 'metric_name' can be used to specify a custom metric name
         
     Returns:
         tuple: (collector_type, parameters_dict)

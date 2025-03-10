@@ -211,61 +211,93 @@ class BusCollector(Collector):
         Returns:
             dict: Formatted metrics ready for SDK
         """
-        # Check for error or status indicators
+        # Use custom metric name if set, otherwise create a default route name
+        route_name = self.metric_name or f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
+        
+        # Check if we have minutes_until_arrival - this is the success case
+        if 'minutes_until_arrival' in raw_metrics:
+            # We have a valid arrival time
+            minutes = raw_metrics['minutes_until_arrival']
+            
+            metrics_data = {
+                'name': route_name,
+                'value': minutes,  # Use the actual minutes value
+                'unit': 'min',
+                'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+                'metadata': {
+                    'from_stop': self.from_stage_name,
+                    'to_stop': self.to_stage_name,
+                    'status': raw_metrics.get('status', 'Available'),
+                    'journey_id': raw_metrics.get('journey_id', 'Unknown'),
+                    'collector_type': 'bus',
+                    'collection_time': time.time()
+                }
+            }
+            return metrics_data
+            
+        # Handle specific error cases
         if 'status' in raw_metrics:
-            if raw_metrics['status'] != 'success':
-                # Create a unique name for this route, even for error cases
-                route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
-                
+            status = raw_metrics['status']
+            if status == 'not_departed':
+                # Bus hasn't departed yet - this is not an error, just zero minutes
                 return {
-                    'name': route_name,  # Add name field to satisfy SDK requirements
-                    'value': 0,  # Use 0 as a placeholder value for error cases
-                    'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
+                    'name': route_name,
+                    'value': 0,  # Zero minutes until arrival for not departed buses
+                    'unit': 'min',
                     'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
-                    'error': raw_metrics.get('message', 'Unknown error'),
-                    'status': raw_metrics.get('status', 'error')
+                    'metadata': {
+                        'from_stop': self.from_stage_name,
+                        'to_stop': self.to_stage_name,
+                        'status': 'Not departed',
+                        'collector_type': 'bus',
+                        'collection_time': time.time()
+                    }
+                }
+            else:
+                # Other status cases (no_journeys, invalid_format, etc.)
+                return {
+                    'name': route_name,
+                    'value': 0,  # Use 0 as a placeholder value for error cases
+                    'unit': 'min',
+                    'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+                    'error': raw_metrics.get('message', f'Status: {status}'),
+                    'metadata': {
+                        'from_stop': self.from_stage_name,
+                        'to_stop': self.to_stage_name,
+                        'status': status,
+                        'collector_type': 'bus',
+                        'collection_time': time.time()
+                    }
                 }
         
         # Handle error field for backward compatibility
         if 'error' in raw_metrics:
-            # Create a unique name for this route, even for error cases
-            route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
-            
             return {
-                'name': route_name,  # Add name field to satisfy SDK requirements
+                'name': route_name,
                 'value': 0,  # Use 0 as a placeholder value for error cases
-                'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
+                'unit': 'min',
                 'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
-                'error': raw_metrics['error']
+                'error': raw_metrics['error'],
+                'metadata': {
+                    'from_stop': self.from_stage_name,
+                    'to_stop': self.to_stage_name,
+                    'status': 'Error',
+                    'collector_type': 'bus',
+                    'collection_time': time.time()
+                }
             }
             
-        # Check if we have the required fields for a metric
-        if 'minutes_until_arrival' not in raw_metrics:
-            # Create a unique name for this route, even for error cases
-            route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
-            
-            return {
-                'name': route_name,  # Add name field to satisfy SDK requirements
-                'value': 0,  # Use 0 as a placeholder value for error cases
-                'unit': 'min',  # Use 'min' as the unit symbol instead of 'minutes'
-                'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
-                'error': 'No arrival time information available',
-                'status': 'no_data'
-            }
-        
-        # Create a unique name for this route
-        route_name = f"{self.from_stage_name.replace(' ', '_')}_to_{self.to_stage_name.replace(' ', '_')}_bus_time"
-        
-        metrics_data = {
+        # Fallback for any other case
+        return {
             'name': route_name,
-            'value': raw_metrics['minutes_until_arrival'],
-            'unit': 'minutes',
+            'value': 0,  # Use 0 as a placeholder value for unknown cases
+            'unit': 'min',
             'description': f'Minutes until next bus from {self.from_stage_name} to {self.to_stage_name}',
+            'error': 'No arrival time information available',
             'metadata': {
                 'from_stop': self.from_stage_name,
                 'to_stop': self.to_stage_name,
-                'status': raw_metrics.get('status', 'Unknown'),
-                'journey_id': raw_metrics.get('journey_id', 'Unknown'),
+                'status': 'Unknown',
                 'collector_type': 'bus',
                 'collection_time': time.time()
             }
@@ -280,15 +312,40 @@ class BusCollector(Collector):
         Returns:
             dict: Bus metrics or dict with error information
         """
-        # Defer to the base class implementation with our dry_run setting
-        result = super().collect_and_send(dry_run=self.dry_run)
+        # Collect the raw metrics
+        raw_metrics = self.safe_collect()
         
-        # Add our route-specific logging if the collection was successful
-        if 'error' not in result:
+        # Format the metrics for sending
+        formatted_metrics = self.format_metrics(raw_metrics)
+        
+        # Log appropriate information based on the collection result
+        if 'minutes_until_arrival' in raw_metrics:
+            # Successfully collected arrival time
+            minutes = raw_metrics['minutes_until_arrival']
             logger.info("Bus from %s to %s: %s minutes", 
-                      self.from_stage_name, self.to_stage_name, result['minutes_until_arrival'])
+                      self.from_stage_name, self.to_stage_name, minutes)
+        elif 'status' in raw_metrics and raw_metrics['status'] == 'not_departed':
+            # Bus hasn't departed yet
+            logger.info("The bus from %s to %s has not departed yet", 
+                      self.from_stage_name, self.to_stage_name)
+        elif 'error' in raw_metrics or ('status' in raw_metrics and raw_metrics['status'] != 'success'):
+            # Error occurred during collection
+            error_msg = raw_metrics.get('message', raw_metrics.get('error', 'Unknown error'))
+            logger.info("Bus collection issue: %s", error_msg)
         
-        return result
+        # Send the formatted metrics
+        if self.dry_run:
+            logger.info("DRY RUN: Would send %s metrics: %s", self.name, formatted_metrics)
+        else:
+            # Import here to avoid circular imports
+            try:
+                from sdk import metrics_sdk
+                metrics_sdk.send_metrics(formatted_metrics)
+            except (ImportError, AttributeError) as e:
+                logger.warning("Cannot send metrics: %s", str(e))
+        
+        # Return the raw metrics with additional information
+        return {**raw_metrics, 'formatted_metrics': formatted_metrics}
 
 
 if __name__ == '__main__':
