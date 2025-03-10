@@ -498,17 +498,38 @@ def main():
     
     # Run collection rounds
     round_count = 0
+    next_collection_time = time.time()
     try:
         while args.count == 0 or round_count < args.count:
+            current_time = time.time()
+            
+            # Ensure we're on schedule
+            if current_time > next_collection_time:
+                next_collection_time = current_time
+            
             round_count += 1
             logger.info("Collection round %s%s", round_count, 
                         ("/%s" % args.count if args.count > 0 else ""))
             
+            # Perform the collection
+            collection_start_time = time.time()
             collect_all_metrics(args)
+            collection_end_time = time.time()
+            
+            # Calculate the time taken for collection
+            collection_duration = collection_end_time - collection_start_time
+            logger.debug("Collection took %.2f seconds", collection_duration)
             
             if args.count == 0 or round_count < args.count:
-                logger.info("Waiting %s seconds until next collection...", args.interval)
-                time.sleep(args.interval)
+                # Calculate next collection time and wait accordingly
+                next_collection_time += args.interval
+                wait_time = next_collection_time - time.time()
+                
+                if wait_time > 0:
+                    logger.info("Waiting %.2f seconds until next collection...", wait_time)
+                    time.sleep(wait_time)
+                else:
+                    logger.warning("Collection took longer than interval. Next collection will start immediately.")
     
     except KeyboardInterrupt:
         logger.info("Collection interrupted by user.")
