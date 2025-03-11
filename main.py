@@ -160,6 +160,16 @@ def configure_sdk(args: argparse.Namespace) -> None:
     Args:
         args (argparse.Namespace): Command line arguments
     """
+    # Log detailed configuration information for debugging
+    logger.info("Configuration summary:")
+    logger.info("  Server URL: %s", args.server_url)
+    logger.info("  Source name: %s", args.source_name)
+    logger.info("  Explicitly provided arguments: %s", getattr(args, '_parser_source', set()))
+    
+    # Check if the server URL matches what was in the config file
+    if 'server_url' not in getattr(args, '_parser_source', set()):
+        logger.info("Server URL was NOT explicitly provided on command line")
+    
     # Create a new client with the specified configuration
     metrics_sdk.default_client = metrics_sdk.MetricsClient(
         server_url=args.server_url,
@@ -172,6 +182,13 @@ def configure_sdk(args: argparse.Namespace) -> None:
         retry_delay=args.retry_delay,
         request_timeout=args.request_timeout
     )
+    
+    # Ensure and double-check that server URL is set correctly
+    logger.info("SDK client configured with server URL: %s", metrics_sdk.default_client.server_url)
+    
+    # Make sure we're not using localhost unless explicitly requested
+    if 'localhost' in metrics_sdk.default_client.server_url and 'server_url' not in getattr(args, '_parser_source', set()):
+        logger.warning("Using localhost despite config file specifying a different URL!")
 
 
 def instantiate_collector(collector_type: str, collector_args: Dict[str, Any], dry_run: bool) -> Optional[Collector]:
@@ -364,15 +381,23 @@ def merge_config_with_args(config: Dict[str, Any], args: argparse.Namespace) -> 
     # Convert args namespace to dictionary
     args_dict = vars(args)
     
-    # Only apply config values for keys that are None or not present in args
+    # Track arguments explicitly provided on the command line
+    # This is important for determining when to apply config values
+    parser_source = getattr(args, '_parser_source', {})
+    
+    # Apply config values unless they were explicitly provided on command line
     for key, value in config.items():
         # Convert dashes to underscores in key names
         arg_key = key.replace('-', '_')
         
-        # Only set if the value is None or not provided on command line
-        if arg_key in args_dict and args_dict[arg_key] is None:
+        # Apply the config value in these cases:
+        # 1. The key exists in args_dict but wasn't explicitly provided
+        # 2. The key doesn't exist in args_dict at all
+        if arg_key in args_dict and arg_key not in parser_source:
+            logger.debug("Applying config value for %s: %s (overriding default)", arg_key, value)
             args_dict[arg_key] = value
         elif arg_key not in args_dict:
+            logger.debug("Applying config value for %s: %s (new key)", arg_key, value)
             args_dict[arg_key] = value
     
     # Convert back to namespace
@@ -406,6 +431,7 @@ def main():
     if early_args.config_file:
         logger.info("Loading configuration from %s", early_args.config_file)
         config = load_config_from_file(early_args.config_file)
+        logger.info("Raw config loaded from file: %s", config)
     
     # Now discover collectors
     logger.info("Discovering collectors...")
@@ -474,6 +500,14 @@ def main():
     # Parse remaining arguments
     args = parser.parse_args(remaining_args)
     
+    # Track which arguments were explicitly provided on the command line
+    args._parser_source = set()
+    for arg in remaining_args:
+        if arg.startswith('--'):
+            # Extract arg name without the -- prefix
+            arg_name = arg[2:].split('=')[0].replace('-', '_')
+            args._parser_source.add(arg_name)
+    
     # Merge config file values with command line arguments
     if config:
         args = merge_config_with_args(config, args)
@@ -495,8 +529,14 @@ def main():
     # Start command relay if enabled
     if args.enable_command_relay:
         logger.info("Starting command relay client...")
+        # If command_server_url is not specified, use the same URL as the metrics SDK
+        command_server_url = args.command_server_url
+        if not command_server_url:
+            command_server_url = args.server_url
+            logger.info("No command server URL specified, using metrics server URL: %s", command_server_url)
+            
         start_command_relay(
-            server_url=args.command_server_url,
+            server_url=command_server_url,
             api_key=args.api_key,
             client_id=args.source_name,
             poll_interval=args.poll_interval

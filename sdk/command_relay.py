@@ -140,7 +140,11 @@ class CommandRelayClient:
             poll_interval (int): Seconds between polling for commands
             last_command_id (str, optional): ID of the last processed command
         """
-        self.server_url = server_url or os.environ.get("COMMAND_SERVER_URL", "http://localhost:8000")
+        # Import metrics config to share the same server URL
+        from . import config as metrics_config
+        
+        # Use the metrics server URL instead of hardcoding to localhost
+        self.server_url = server_url or os.environ.get("COMMAND_SERVER_URL", metrics_config.SERVER_URL)
         self.api_key = api_key or os.environ.get("COMMAND_API_KEY", config.API_KEY)
         self.client_id = client_id or os.environ.get("CLIENT_ID", str(uuid.uuid4()))
         self.poll_interval = poll_interval
@@ -229,6 +233,11 @@ class CommandRelayClient:
                     response.status_code,
                     response.text
                 )
+                
+                # Provide more detailed debugging information for common errors
+                if response.status_code == 404:
+                    logger.info("This may indicate that the client ID '%s' is not registered on the server", self.client_id)
+                    logger.info("API endpoint used: %s/api/commands/pending", self.server_url.rstrip("/"))
         except requests.RequestException as e:
             logger.error("Error polling commands: %s", str(e))
         except Exception as e:

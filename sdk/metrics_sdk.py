@@ -298,7 +298,19 @@ class MetricsClient:
             retry_delay (int, optional): Delay between retries in seconds. Defaults to config.RETRY_DELAY.
             request_timeout (int, optional): Request timeout in seconds. Defaults to config.REQUEST_TIMEOUT.
         """
-        self.server_url = server_url or config.SERVER_URL
+        # Add detailed debug logging to track server URL
+        logger.debug("MetricsClient init - Provided server_url: '%s'", server_url)
+        logger.debug("MetricsClient init - Default config.SERVER_URL: '%s'", config.SERVER_URL)
+        
+        # Modified initialization to handle specified server_url
+        # Use the provided server_url parameter, not the default from config
+        if server_url is not None and server_url.strip() != "":
+            self.server_url = server_url
+            logger.info("Using provided server URL: %s", self.server_url)
+        else:
+            self.server_url = config.SERVER_URL
+            logger.warning("No server URL provided, using default: %s", self.server_url)
+        
         self.api_key = api_key or config.API_KEY
         self.source_name = source_name or config.SOURCE_NAME
         self.source_description = source_description or config.SOURCE_DESCRIPTION
@@ -316,9 +328,11 @@ class MetricsClient:
         # Initialize unit manager
         self.unit_manager = UnitManager(self)
         
-        # Load metric types and ensure source exists
-        self._load_metric_types()
-        self._ensure_source()
+        # Don't automatically load metric types and ensure source during initialization
+        # This will be done explicitly when needed to prevent premature server connections
+        # with potentially wrong server URL.
+        # self._load_metric_types()
+        # self._ensure_source()
     
     def _retry_if_connection_error(self, exception: Exception) -> bool:
         """
@@ -572,6 +586,14 @@ class MetricsClient:
         Returns:
             bool: True if successful, False otherwise
         """
+        # Ensure we have loaded metric types and source before proceeding
+        # This is necessary because we disabled automatic loading in the constructor
+        if not self.metric_types:
+            self._load_metric_types()
+        
+        if not self.source_id:
+            self._ensure_source()
+            
         # Try to send any buffered metrics first
         if len(self.buffer) > 0:
             buffered_metrics = self.buffer.get_all()
@@ -696,17 +718,26 @@ class MetricsClient:
             bool: True if server is accessible, False otherwise
         """
         try:
-            # Try to get metric types as a health check
+            # Ensure we're using the correct server_url that was provided during configuration
+            server_url = self.server_url
+            logger.debug("Health check using server URL: %s", server_url)
+            
             response = requests.get(
-                f"{self.server_url.rstrip('/')}/api/metric-types/",
+                f"{server_url.rstrip('/')}/api/metric-types/",
                 headers={'X-API-Key': self.api_key},
                 timeout=self.request_timeout
             )
-            # Also try to ensure our source is registered
+            
             if response.status_code == 200:
-                self._ensure_source()
-            return response.status_code == 200
-        except requests.exceptions.RequestException:
+                logger.info("Successfully connected to metrics server at: %s", server_url)
+                # We don't automatically ensure source here anymore to prevent multiple init attempts
+                # self._ensure_source()
+                return True
+            else:
+                logger.warning("Server returned status code %s", response.status_code)
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.warning("Failed to connect to metrics server at %s: %s", self.server_url, str(e))
             return False
     
     def get_buffered_count(self) -> int:
@@ -719,8 +750,15 @@ class MetricsClient:
         return len(self.buffer)
 
 
-# Singleton instance for easy import
-default_client = MetricsClient()
+# Singleton instance for easy import - initialized as None and set up later
+default_client = None
+
+# Helper function to ensure default client exists
+def ensure_default_client():
+    global default_client
+    if default_client is None:
+        logger.warning("Default client not initialized, creating with default values. This is not recommended.")
+        default_client = MetricsClient()
 
 
 def send_metrics(metrics_data: Dict[str, Any]) -> bool:
@@ -733,6 +771,7 @@ def send_metrics(metrics_data: Dict[str, Any]) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    ensure_default_client()
     return default_client.send_metrics(metrics_data)
 
 
@@ -746,6 +785,7 @@ def create_metrics_batch(metrics: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         dict: The metrics batch
     """
+    ensure_default_client()
     return default_client.create_metrics_batch(metrics)
 
 
@@ -756,6 +796,7 @@ def health_check() -> bool:
     Returns:
         bool: True if server is accessible, False otherwise
     """
+    ensure_default_client()
     return default_client.health_check()
 
 
@@ -766,4 +807,5 @@ def get_buffered_count() -> int:
     Returns:
         int: Number of buffered metrics
     """
+    ensure_default_client()
     return default_client.get_buffered_count()

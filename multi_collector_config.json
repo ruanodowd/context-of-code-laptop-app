@@ -1,10 +1,10 @@
 {
     "collectors": [
         "battery:metric_name=Laptop Battery Status"],
-    "interval": 60,
+    "interval": 10,
     "count": 0,
     "log-level": "INFO",
-    "server-url": "http://144.126.214.129:8000",
+    "server-url": "http://144.126.214.129/",
     "source-name": "Multi-Collector-Config",
     "source-description": "Configuration with multiple collectors and custom metric names",
     "dry-run": false,

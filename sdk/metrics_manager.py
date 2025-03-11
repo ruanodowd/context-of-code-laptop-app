@@ -23,7 +23,20 @@ class MetricsManager:
             client (MetricsClient, optional): The metrics client to use. Defaults to the default client.
         """
         self.collectors: List[Collector] = []
-        self.client = client or default_client
+        
+        # Check if we need to create a client
+        if client is not None:
+            self.client = client
+        elif default_client is not None:
+            self.client = default_client
+        else:
+            # Import ensure_default_client to avoid circular imports
+            from .metrics_sdk import ensure_default_client
+            ensure_default_client()
+            from .metrics_sdk import default_client as fresh_client
+            self.client = fresh_client
+            
+        # Now we can safely access the unit_manager
         self.unit_manager = self.client.unit_manager
     
     def register_collector(self, collector: Collector) -> None:
@@ -87,8 +100,16 @@ class MetricsManager:
         return self.client.get_buffered_count()
 
 
-# Singleton instance for easy import
-default_manager = MetricsManager()
+# Singleton instance for easy import - initialized as None and set up on first use
+default_manager = None
+
+# Helper function to ensure default manager exists
+def ensure_default_manager():
+    global default_manager
+    if default_manager is None:
+        from .metrics_sdk import default_client
+        # Only create default_manager after SDK has been properly configured
+        default_manager = MetricsManager(client=default_client)
 
 
 # Convenience functions that use the default manager
@@ -99,6 +120,7 @@ def register_collector(collector: Collector) -> None:
     Args:
         collector (Collector): The collector to register
     """
+    ensure_default_manager()
     default_manager.register_collector(collector)
 
 
@@ -109,6 +131,7 @@ def register_collectors(collectors: List[Collector]) -> None:
     Args:
         collectors (List[Collector]): The collectors to register
     """
+    ensure_default_manager()
     default_manager.register_collectors(collectors)
 
 
@@ -119,6 +142,7 @@ def collect_metrics() -> Dict[str, Any]:
     Returns:
         dict: The collected metrics
     """
+    ensure_default_manager()
     return default_manager.collect_metrics()
 
 
@@ -129,6 +153,7 @@ def collect_and_send() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    ensure_default_manager()
     return default_manager.collect_and_send()
 
 
@@ -139,6 +164,7 @@ def get_buffered_count() -> int:
     Returns:
         int: Number of buffered metrics
     """
+    ensure_default_manager()
     return default_manager.get_buffered_count()
 
 
@@ -155,6 +181,7 @@ def create_unit(name: str, symbol: str, description: Optional[str] = None) -> Un
     Returns:
         Unit: The created unit
     """
+    ensure_default_manager()
     return default_manager.unit_manager.create_unit(name, symbol, description)
 
 
@@ -168,6 +195,7 @@ def get_unit(unit_id: UUID) -> Unit:
     Returns:
         Unit: The requested unit
     """
+    ensure_default_manager()
     return default_manager.unit_manager.get_unit(unit_id)
 
 
@@ -181,6 +209,7 @@ def get_unit_by_symbol(symbol: str) -> Unit:
     Returns:
         Unit: The requested unit
     """
+    ensure_default_manager()
     return default_manager.unit_manager.get_unit_by_symbol(symbol)
 
 
@@ -191,6 +220,7 @@ def list_units() -> List[Unit]:
     Returns:
         List[Unit]: List of all units
     """
+    ensure_default_manager()
     return default_manager.unit_manager.list_units()
 
 
@@ -205,6 +235,7 @@ def update_unit(unit_id: UUID, **kwargs) -> Unit:
     Returns:
         Unit: The updated unit
     """
+    ensure_default_manager()
     return default_manager.unit_manager.update_unit(unit_id, **kwargs)
 
 
@@ -218,4 +249,5 @@ def delete_unit(unit_id: UUID) -> bool:
     Returns:
         bool: True if deleted successfully
     """
+    ensure_default_manager()
     return default_manager.unit_manager.delete_unit(unit_id)
